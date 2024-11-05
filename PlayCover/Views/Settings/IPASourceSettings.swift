@@ -8,26 +8,29 @@
 import SwiftUI
 
 struct SourceData: Identifiable, Hashable {
-    var id = UUID()
+    var id: UUID
     var source: String
-    var status: SourceValidation = .valid
+    var status: SourceValidation
+    var isEnabled: Bool
 
-    enum SourceDataKeys: String, CodingKey {
-        case source
-    }
 }
 
-extension SourceData: Encodable {
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: SourceDataKeys.self)
-        try container.encode(source, forKey: .source)
+extension SourceData: Codable {
+    init(source: String, isEnabled: Bool) {
+        self.id = UUID()
+        self.source = source
+        self.status = .checking
+        self.isEnabled = isEnabled
     }
-}
 
-extension SourceData: Decodable {
     init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: SourceDataKeys.self)
-        source = try values.decode(String.self, forKey: .source)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID(),
+            source: try container.decode(String.self, forKey: .source),
+            status: .checking,
+            isEnabled: try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        )
     }
 }
 
@@ -42,7 +45,8 @@ struct IPASourceSettings: View {
         Form {
             HStack {
                 List(storeVM.sourcesList, id: \.id, selection: $selected) { source in
-                    SourceView(source: source)
+                    SourceView(source: source,
+                               isEnabled: source.isEnabled)
                 }
                 .listStyle(.bordered(alternatesRowBackgrounds: true))
                 Spacer()
@@ -102,11 +106,14 @@ struct IPASourceSettings: View {
 
 struct SourceView: View {
     var source: SourceData
+    @State var isEnabled: Bool
     @State var showingPopover = false
 
     var body: some View {
         HStack {
-            Text(source.source)
+            Toggle(source.source, isOn: $isEnabled)
+            .foregroundStyle(isEnabled ? .primary : .secondary)
+            .help("state.enabled")
             Spacer()
             switch source.status {
             case .badjson:
@@ -132,11 +139,22 @@ struct SourceView: View {
             case .empty:
                 EmptyView()
             case .valid:
-                StatusBadgeView(imageName: "checkmark.circle.fill",
-                                imageColor: .green,
-                                popoverText: "preferences.popover.valid",
-                                showingPopover: $showingPopover)
+                if isEnabled {
+                    StatusBadgeView(imageName: "checkmark.circle.fill",
+                                    imageColor: .green,
+                                    popoverText: "preferences.popover.valid",
+                                    showingPopover: $showingPopover)
+                } else {
+                    StatusBadgeView(imageName: "checkmark.circle.badge.xmark.fill",
+                                    imageColor: .gray,
+                                    popoverText: "state.disabled",
+                                    showingPopover: $showingPopover)
+                }
             }
+        }
+        .onChange(of: isEnabled) { value in
+            StoreVM.shared.enableSourceToggle(source: source, value: value)
+            StoreVM.shared.updateSourcesApps()
         }
     }
 }
@@ -162,7 +180,7 @@ struct StatusBadgeView: View {
     }
 }
 
-enum SourceValidation {
+enum SourceValidation: Codable {
     case badjson, badurl, checking, duplicate, valid, empty
 }
 
@@ -219,7 +237,7 @@ struct AddSourceView: View {
                 }
                 Button {
                     if let sourceURL = newSourceURL?.absoluteString {
-                        storeVM.addSource(SourceData(source: sourceURL))
+                        storeVM.addSource(SourceData(source: sourceURL, isEnabled: true))
                         addSourceSheet.toggle()
                     }
                 } label: {

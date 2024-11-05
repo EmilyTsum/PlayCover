@@ -27,15 +27,35 @@ class StoreVM: ObservableObject, @unchecked Sendable {
     }
     @Published var sourcesData: [SourceJSON] = [] {
         didSet {
-            sourcesApps.removeAll()
-            for source in sourcesData {
-                appendSourceData(source)
-            }
+            updateSourcesApps()
         }
     }
     @Published var sourcesApps: [SourceAppsData] = []
 
     private var resolveTask: Task<Void, Never>?
+
+    public func getEnabledSources() -> [SourceJSON] {
+        return StoreVM.shared.sourcesData.filter { sourceJSON in
+            return StoreVM.shared.sourcesList.contains { sourceData in
+                sourceData.id == sourceJSON.id && sourceData.isEnabled
+            }
+        }
+    }
+
+    func enableSourceToggle(source: SourceData, value: Bool) {
+        if let index = sourcesList.firstIndex(of: source) {
+            sourcesList[index].isEnabled = value
+        }
+        updateSourcesApps()
+    }
+
+    func updateSourcesApps() {
+        sourcesApps.removeAll()
+        let enabledSources: [SourceJSON] = getEnabledSources()
+        for source in enabledSources {
+            appendSourceData(source)
+        }
+    }
 
     //
     func addSource(_ source: SourceData) {
@@ -104,7 +124,8 @@ class StoreVM: ObservableObject, @unchecked Sendable {
 
             for index in sourcesList.indices {
                 sourcesList[index].status = .checking
-                let (sourceJson, sourceState) = await getSourceData(sourceLink: sourcesList[index].source)
+                let (sourceJson, sourceState) = await getSourceData(sourceLink: sourcesList[index].source,
+                                                                    sourceId: sourcesList[index].id)
                 guard sourcesCount == sourcesList.count else { return }
                 sourcesList[index].status = sourceState
                 if sourceState == .valid, let sourceJson {
@@ -143,7 +164,7 @@ class StoreVM: ObservableObject, @unchecked Sendable {
     }
 
     //
-    private func getSourceData(sourceLink: String) async -> (SourceJSON?, SourceValidation) {
+    private func getSourceData(sourceLink: String, sourceId: UUID) async -> (SourceJSON?, SourceValidation) {
         guard let url = URL(string: sourceLink) else { return (nil, .badurl) }
         var dataToDecode: Data?
         do {
@@ -169,7 +190,7 @@ class StoreVM: ObservableObject, @unchecked Sendable {
                 ? (url.absoluteString as NSString).lastPathComponent.replacingOccurrences(of: ".json", with: "")
                 : url.host ?? url.absoluteString
                 let oldTypeJson: [SourceAppsData] = try JSONDecoder().decode([SourceAppsData].self, from: unwrappedData)
-                decodedData = SourceJSON(name: sourceName, data: oldTypeJson)
+                decodedData = SourceJSON(name: sourceName, data: oldTypeJson, id: sourceId)
                 return (decodedData, .valid)
             } catch {
                 debugPrint("Error decoding data from URL: \(url): \(error)")
@@ -191,6 +212,7 @@ class StoreVM: ObservableObject, @unchecked Sendable {
 struct SourceJSON: Codable, Equatable, Hashable {
     let name: String
     let data: [SourceAppsData]
+    let id: UUID
 }
 
 struct SourceAppsData: Codable, Equatable, Hashable {
