@@ -82,6 +82,13 @@ class PlayApp: BaseApp {
 
     func runAppExec() {
         let config = NSWorkspace.OpenConfiguration()
+        
+        // This is to prevent Xcode from attaching debugging-related variables
+        // that inject macOS-specific libraries such as `libViewDebuggerSupport.dylib`,
+        // which then fail to load inside iOS apps (missing symbols like _OBJC_CLASS_$_AVPlayerView).
+        for (key, _) in ProcessInfo.processInfo.environment where key.hasPrefix("DYLD_") {
+            unsetenv(key)
+        }
 
         NSWorkspace.shared.openApplication(
             at: aliasURL,
