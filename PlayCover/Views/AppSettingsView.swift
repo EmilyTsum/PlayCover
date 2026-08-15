@@ -1104,6 +1104,8 @@ struct MetalCaptureView: View {
                     "capture \(String(format: "%.1f", status.captureFPS)) fps • " +
                     "encode \(String(format: "%.1f", status.encodedFPS)) fps"
                 )
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
                 Text(
                     "frames: presented \(status.presented) • captured \(status.captured) • " +
                     "encoded \(status.encoded) • drops \(status.totalDrops) • " +
@@ -1112,6 +1114,15 @@ struct MetalCaptureView: View {
                 )
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
+                if status.samplingSkipPerSecond > 1,
+                   status.presentFPS > Double(settings.settings.metalCaptureFPS) + 5 {
+                    Text(
+                        "Sampling skips are intentional target-FPS filtering here: the game is presenting faster " +
+                        "than the configured capture rate. They do not represent encoder drops."
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
                 Text("SDR gate \(status.captureEnabled ? "enabled" : "disabled") • " +
                      "EDR \(status.edr == 1 ? "on" : "off") • colorspace \(status.colorSpace)")
                     .font(.caption.monospacedDigit())
