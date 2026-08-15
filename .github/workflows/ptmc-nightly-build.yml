@@ -56,6 +56,8 @@ jobs:
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'presentFPS'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_CAPTURE_METAL_HUD'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'burstSlotUses'
+          nm -gU Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTPreserveMetalHUDMenuItem'
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'requestRecordPermissionWithCompletionHandler:'
 
       - name: Typecheck PTMC CLI
         run: |
@@ -98,6 +100,8 @@ jobs:
           strings "$FRAME/PlayTools" | grep -F 'presentFPS'
           strings "$FRAME/PlayTools" | grep -F 'PTMC_CAPTURE_METAL_HUD'
           strings "$FRAME/PlayTools" | grep -F 'burstSlotUses'
+          nm -gU "$FRAME/PlayTools" | grep -F 'PTPreserveMetalHUDMenuItem'
+          strings "$FRAME/PlayTools" | grep -F 'requestRecordPermissionWithCompletionHandler:'
           xcrun vtool -show-build "$FRAME/PlayTools"
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict "$APP"

@@ -1,99 +1,142 @@
-# PTMC integration
+# PTMC integration — maintainer source of truth
 
-This branch follows upstream PlayCover `develop` and bundles the public `EmilyTsum/PlayTools` `metal-capture` branch.
+This file is the first document to read for the `ptmc-nightly` branch. It records the current architecture, invariants, accepted external patches, validation boundary, and release procedure. Do not reconstruct PTMC state from old CI logs, scratch files, or historical failure notes unless a regression specifically requires them.
 
-Pinned PlayTools commit at this revision: `d01eb6c94cf5919cd1bd51448bf9010c00b8d67a`.
+## Current source pins
 
-## User-facing control
+- PlayCover branch: `EmilyTsum/PlayCover:ptmc-nightly`
+- PlayTools branch: `EmilyTsum/PlayTools:metal-capture`
+- Pinned PlayTools commit: `2f737c8da8578452ed2d0586d104f7d3b98edf4b`
+- Legacy overlay repository is retained only for reproducibility; it is not the active implementation.
 
-PTMC remains implemented inside PlayTools in the game process. PlayCover owns configuration and control only:
+`Cartfile.resolved` is authoritative for the PlayTools revision bundled into PlayCover. CI writes both PlayCover and PlayTools commit IDs into every DMG artifact.
 
-- Every installed game has a **Capture** section in its existing App Settings sheet.
-- Capture enablement, autostart, target FPS, HEVC bitrate, NV12 ring size, log interval, display-sync diagnostic, maximum-FPS spoof and output directory are persisted per game in `AppSettingsData`.
-- PlayCover writes a per-game PTMC runtime plist and also passes launch-time values through `NSWorkspace.OpenConfiguration.environment`; no global `launchctl setenv` setup is required.
-- Start, stop and status controls use bundle-targeted Darwin notifications such as `io.playcover.ptmc.start.<bundle-id>`, so two PTMC-enabled games do not have to start/stop together.
-- The sandboxed game stages `.partial.mov` / finalized `.mov` files under PlayCover's shared container, then PlayCover exports completed recordings to `~/Movies` or the selected destination.
+## Capture architecture and non-negotiable invariants
 
-The PTMC options intentionally keep frame-pacing overrides opt-in. `CAMetalLayer.displaySyncEnabled = NO` and `UIScreen.maximumFramesPerSecond` spoofing should be enabled only while diagnosing a game that still presents at 60 fps.
+PTMC captures inside the translated game process before WindowServer composition:
 
-## Distribution
+`Unity/game Metal drawable -> PTMC GPU copy/convert -> IOSurface-backed CVPixelBuffer ring -> VideoToolbox -> compressed CMSampleBuffer -> AVAssetWriter`
 
-`.github/workflows/ptmc-nightly-build.yml` builds the current `ptmc-nightly` branch on `macos-latest`, bootstraps the exact PlayTools commit from `Cartfile.resolved`, verifies PTMC strings in both the Carthage product and bundled framework, ad-hoc signs the resulting app, creates a DMG and uploads it as an Actions artifact.
+Keep these invariants unless real-device evidence justifies changing them:
 
-Official Sparkle updates are disabled on this branch so the upstream update feed cannot silently replace the PTMC build. Updates are distributed through this fork's GitHub releases/Homebrew tap instead.
+- No ScreenCaptureKit video capture. ScreenCaptureKit is used only by PlayCover for target-application audio.
+- No CPU frame readback (`getBytes`, full-frame memcpy, or equivalent).
+- No per-frame raw-buffer allocation. Encoder inputs are preallocated IOSurface-backed CVPixelBuffers/CVMetalTextures.
+- No per-frame Objective-C callback-context allocation. VideoToolbox callback metadata lives on the preallocated slot.
+- No per-frame Objective-C class scan. Runtime hook discovery happens at recording activation / image-load discovery points.
+- Never block the game's render/present thread on VideoToolbox or disk I/O. Overload drops capture work instead.
+- Runtime present hooks are installed only while recording and original IMPs are restored on Stop.
+- Direct `CAMetalDrawable.present*` interception is the primary Unity path observed on real hardware. `MTLCommandBuffer presentDrawable:*` remains a fallback.
+- Supported source formats are currently BGRA8Unorm and BGRA8Unorm_sRGB. Do not claim HDR drawable-format support without implementing and testing it explicitly.
 
-## Real-device v0.1.4 fixes
+## GPU / encoder path
 
-Real-device analysis on Apple Silicon/macOS 27 found that concrete AGX command-buffer classes conform to `MTLCommandBuffer` but inherit `presentDrawable:*` from `_MTLCommandBuffer`, while `_MTLCommandBuffer` itself does not report protocol conformance. The previous own-method-only swizzle therefore never intercepted the game's real present path. PTMC now installs concrete overrides on conforming command-buffer classes when the present methods are inherited, preserving the inherited IMP for the tail call.
+HEVC uses a 2x2 Metal compute kernel that converts BGRA directly into IOSurface-backed BT.709 video-range NV12. Scaling, when requested, is folded into that GPU conversion. VideoToolbox hardware acceleration is required, real-time mode is enabled, and frame reordering is disabled.
 
-The same analysis ruled out environment propagation, stale PlayTools, missing injection, Darwin notification delivery, and sandbox write permissions. Runtime status now includes a one-second heartbeat and present-hook count so a broken hook path is visible without manually refreshing the UI.
+ProRes 422 LT / 422 / 422 HQ use IOSurface-backed BGRA buffers. Native-size capture is a direct Metal blit; scaled capture uses a Metal compute copy directly into the encoder buffer. There is no intermediate CPU image.
 
-SDR enforcement now applies whenever capture is enabled, not only after Start Recording. PTMC blocks EDR requests and normalizes `CAMetalLayer.colorspace` to standard sRGB while leaving the game's Metal pixel format untouched. The real-device evidence that motivated these changes is kept in `docs/PTMC/FAILURE_ANALYSIS_REAL_DEVICE.md`.
+Capture resolution is independent of the game drawable. Modes are `source`, 2160p, 1440p, 1080p, 720p, and custom maximum dimensions. Aspect ratio is preserved and PTMC does not upscale above the source drawable.
 
-## Real-device capture path
+VideoToolbox submission uses a dedicated user-initiated serial queue. Compressed writer work uses a separate utility queue. The raw slot is released in the VideoToolbox output callback before AVAssetWriter work, so disk pressure cannot retain scarce raw capture buffers.
 
-PTMC now intercepts both `MTLCommandBuffer presentDrawable:*` and direct `CAMetalDrawable present*` submission paths. Unity titles observed on Apple Silicon use the latter directly. Frame-path hooks are installed lazily only when recording starts, implementation owners are deduplicated, and dormant wrappers use a fast-path so PTMC has near-zero overhead before the first recording.
+## 4K frame pacing / backpressure
 
-The capture FPS setting is an actual sampling ceiling: a 120 Hz game captured at 60 fps skips conversion/encode work for intermediate presents instead of merely tagging the encoder as 60 fps. Video codecs are HEVC plus hardware-required Apple ProRes 422 LT / 422 / 422 HQ.
+The normal raw ring defaults to 3 slots. A single additional preallocated emergency slot is cooldown-limited to absorb isolated encoder-latency spikes without turning the capture pipeline into a deep queue. `burstSlotUses` reports those recoveries.
 
-Game audio is captured separately by PlayCover with ScreenCaptureKit's application-level audio filter at 48 kHz stereo AAC, then muxed into the finalized PTMC MOV. No ScreenCaptureKit video frames are used by PTMC.
+The sampler distinguishes near-target jitter from real rate conversion. If the measured source cadence is effectively the requested capture rate, every present is accepted so small 60 Hz timing error does not become a 1/2-frame hole. When the source is clearly faster, PTMC uses a phase-preserving deadline sampler (for example 120 -> 60).
 
-### Performance behavior
+`samplingSkipped` is intentional target-FPS filtering, not an encoder failure. Runtime status exposes present/capture/encode FPS, sampling skips/s, raw in-flight frames, compressed pending writes, pool/encoder/late drops, burst recoveries, and owned capture-command timing.
 
-Frame-path hooks are installed only when Start Recording is requested. Direct `CAMetalDrawable.present*` is preferred on real-device Unity; command-buffer interception is only a fallback. On Stop, PTMC restores the original Metal method implementations, so the idle game returns to native dispatch with no per-frame PTMC wrapper. The UI reads the runtime heartbeat without continuously posting status notifications or rewriting configuration.
+The remaining user-reported target to validate on hardware is rare ~1–2 frame loss around 4K60. CI cannot prove this is eliminated; inspect the runtime counters on the user's Mac before making that claim.
 
-The Metal Performance HUD is enabled by default for newly created app settings. Its launch environment explicitly keeps the HUD menu bar available (`MTL_HUD_DISABLE_MENU_BAR=0`) and enables the detailed avg/min/max value-range view (`MTL_HUD_SHOW_VALUE_RANGE=1`). Encoder timing is intentionally not forced because Apple documents additional HUD CPU overhead for that mode.
+## Presentation controls
 
-## CLI controller
+Optional **Suppress on-screen output** makes only the capture CAMetalLayer transparent while continuing original present calls, allowing normal drawable recycling and potentially reducing visible compositor work.
 
-On macOS, `scripts/ptmcctl.swift` provides direct runtime diagnostics without opening App Settings:
+Optional **Skip display present** bypasses forwarding the present after PTMC has captured it. This is deliberately marked unsafe because some games can starve/freeze their drawable pool. It must remain opt-in.
+
+Display-sync disabling and UIScreen maximum-FPS spoofing are diagnostics, not defaults. Capture-layer framebuffer-only, display-sync, EDR, colorspace, opacity, and HUD state are restored on Stop.
+
+## Metal HUD policy
+
+Metal HUD is enabled by default for new app settings, with its menu bar kept available and detailed value-range metrics requested. Encoder timing is not forced because the diagnostic itself adds overhead.
+
+**Include Metal HUD in recording** defaults off. While recording, PTMC attempts to suppress HUD composition on the active CAMetalLayer via the runtime `developerHUDProperties` selector when that selector exists, and restores the original dictionary on Stop. This selector is runtime/private-ish behavior rather than a compatibility guarantee; treat HUD exclusion as requiring real-device verification after OS updates.
+
+PlayTools also includes upstream PR #229's fix that preserves the system Metal HUD menu item across UIKit main-menu rebuilds.
+
+## Audio
+
+PlayCover captures only the selected game's audio using ScreenCaptureKit application audio at 48 kHz stereo AAC. It writes a temporary sidecar, then muxes it into the finalized PTMC MOV using the first video/audio host-time measurements and a passthrough AVAssetExportSession. No ScreenCaptureKit video is involved.
+
+A/V sync still requires real-device validation; CI only proves the code builds/packages.
+
+## PlayCover host-side improvements
+
+The PTMC fork also carries conservative host fixes that reduce unrelated stalls and macOS compatibility failures:
+
+- app-library directory/Info.plist scanning moves off the main actor, then PlayApp objects are published in one main-actor batch;
+- bundle-ID cache reconciliation is a single atomic merge/write instead of repeated reopen/append operations;
+- icon extraction is cache-first and runs away from SwiftUI's main task;
+- iTunes lookup is cache-first and coalesces duplicate in-flight requests;
+- IPA temp-directory cleanup is guaranteed by `defer`, and temp replacement uses the system temporary directory;
+- copied AKInterface extended attributes are cleared before ad-hoc signing to avoid FinderInfo/resource-fork codesign failures;
+- macOS 27 launch aliases contain a real Info.plist while other top-level bundle items remain symlinks (upstream PR #2185);
+- M5 iPad Pro / iPhone 17 Pro Max choices and matching PlayTools board IDs are included (upstream PRs #2187 / #231).
+
+## Accepted upstream/fork patches
+
+These were reviewed and intentionally incorporated rather than blindly merging a fork:
+
+- PlayTools #229 — preserve Metal HUD menu after menu rebuild.
+- PlayTools #233 — resolve the real account home directory with `getpwuid_r(getuid())`; removes the keymapping `/Users/<name>` assumption and avoids sandbox-container HOME confusion.
+- PlayTools #232, first commit only — macOS 26 microphone permission synchronization through AVAudioApplication with legacy fallback. Its later path workaround was not taken because #233 supersedes it.
+- PlayTools #231 / PlayCover #2187 — current M5 iPad Pro and iPhone 17 Pro Max device/board IDs.
+- PlayCover #2185 — real Info.plist in launch alias for macOS 27 LaunchServices `-54` / `permErr` behavior.
+- Kylinlixd PlayCover performance work — only the low-risk app-library/cache/icon/temp cleanup concepts were adapted. The fork's blanket macOS 26 deployment-target change and broad project rewrite were intentionally not imported.
+- Kylinlixd signing cleanup — adapted as a narrowly scoped xattr cleanup immediately before signing the copied AKInterface bundle.
+
+## Reviewed but intentionally deferred
+
+- PlayTools #226 background keepalive: suppresses lifecycle events and runs silent audio; its own report notes quick-relaunch and OBS interactions. Too invasive for a default PTMC fork.
+- PlayTools #227 privacy plist patch: mixes usage descriptions and an entitlement-like key in Info.plist. Do not copy it without separately validating the entitlement/signing path.
+- PlayCover issue #2181 delayed-present workaround for ZZZ fullscreen 120 Hz: evidence is game-specific. Do not globally replace `present*AfterMinimumDuration` semantics without a per-game control and real-device proof.
+- Full Kylinlixd macOS-26-only conversion: unnecessary for PTMC and would discard older supported macOS configurations without capture-specific benefit.
+
+## Runtime control
+
+Per-game Capture settings are written to a PTMC runtime plist and launch environment. Start/Stop/status use bundle-targeted Darwin notifications (`io.playcover.ptmc.<command>.<bundle-id>`). The game writes partial/final MOVs under PlayCover's container; PlayCover exports completed files to `~/Movies` or the chosen directory.
+
+`scripts/ptmcctl.swift` can inspect and control the same runtime on macOS:
 
 ```sh
 ./scripts/ptmcctl.swift status com.example.game
 ./scripts/ptmcctl.swift start com.example.game
 ./scripts/ptmcctl.swift record com.example.game 10
-./scripts/ptmcctl.swift config com.example.game fps=60 codec=prores422lt forceSDR=true
+./scripts/ptmcctl.swift config com.example.game fps=60 codec=hevc resolution=2160p includeHUD=false
 ./scripts/ptmcctl.swift inspect com.example.game
 ```
 
-The CLI uses the same targeted Darwin notifications and PTMC runtime plist as PlayCover. Audio recording remains host-owned by PlayCover because ScreenCaptureKit permission and per-application audio filtering belong to the host process.
+Audio remains PlayCover-host-owned because ScreenCaptureKit permission/filtering belongs to the host process.
 
-For ProRes, PTMC uses a BGRA IOSurface ring and a direct Metal blit instead of running the full BGRA-to-NV12 compute conversion used by HEVC. This reduces PTMC GPU work; the Apple ProRes hardware encoder performs the required codec-side conversion.
+## Validation boundary
 
-The optimized capture path uses a 2×2 HEVC BGRA→NV12 compute kernel, a direct BGRA blit path for ProRes, one-time capture-layer normalization with restoration on Stop, and native Metal dispatch whenever recording is inactive.
+Automated validation can prove:
 
-### Capture resolution and GPU memory path
+- PTMC static invariants / patch roundtrip / sampler model;
+- Metal shader compilation;
+- PlayTools macOS CI build and framework validation;
+- PlayCover SwiftLint, CLI typecheck, app build, framework embedding, codesign, DMG creation;
+- Homebrew installation and PlayCover startup smoke.
 
-Capture resolution is independent from the game drawable. `source`, 2160p, 1440p, 1080p, 720p, and custom maximum-size modes preserve aspect ratio and never upscale. HEVC downscales while converting BGRA directly to the IOSurface-backed NV12 VideoToolbox input; ProRes downscales directly into an IOSurface-backed BGRA input. There is no CPU frame readback or intermediate full-frame CPU copy.
+Automated validation **cannot** prove game-render FPS, rare 4K60 frame loss, HUD visibility/exclusion, actual VideoToolbox hardware behavior under sustained game load, or A/V sync. Those require the user's Apple Silicon Mac and a real game run.
 
-The optional experimental display-suppression mode sets only the capture CAMetalLayer opacity to zero while continuing to call the original present method so drawable recycling remains intact; Stop restores the original opacity and other presentation state.
+## Release checklist
 
-### 4K frame-pacing / asynchronous encoder changes
-
-The capture sampler now uses a deadline schedule with up to 1 ms of jitter tolerance. `samplingSkipped` is an intentional sampling count (for example, roughly 60 skips/s when a 120 Hz drawable is recorded at 60 fps), not an encoder failure. This also avoids the old edge case where slightly-early 60 Hz presents could be rejected every other frame.
-
-VideoToolbox submission runs on a dedicated user-initiated serial queue. Its callback releases the raw IOSurface capture slot immediately, before disk/writer work. Compressed AVAssetWriter work is isolated on a separate utility queue, so storage backpressure no longer holds raw capture slots or blocks further VideoToolbox submission. The default capture ring is now 3 slots; larger rings remain available for experimentation.
-
-### Metal HUD diagnostics default
-
-New per-app settings default Metal HUD to enabled. At launch PlayCover keeps the macOS Metal HUD menu bar available and requests Apple's detailed value-range view (`MTL_HUD_SHOW_VALUE_RANGE=1`, with the current range key also enabled). PTMC does not force encoder timing or per-frame HUD logging because Apple documents additional HUD CPU cost for encoder timing; those heavier diagnostics remain opt-in from the Metal HUD menu/configuration panel. Existing saved per-app HUD choices remain unchanged.
-
-
-### Near-target jitter handling
-
-When the measured drawable cadence is effectively the requested capture rate, PTMC now accepts every present instead of applying a rate gate. This prevents small 60 Hz pacing jitter from becoming one/two-frame capture holes. Once the source is clearly faster than the target, PTMC switches to phase-preserving deadline sampling (for example 120→60 or 90→60).
-
-The normal raw-frame ring remains 3 slots. One additional preallocated emergency IOSurface slot may be used at most once per 250 ms to absorb isolated VideoToolbox latency spikes, but it is cooldown-limited so sustained overload still drops rather than growing a deep queue and disturbing game rendering.
-
-
-### Metal HUD capture policy
-
-The Metal Performance HUD remains enabled by default for diagnostics, but capture now defaults to excluding it. PTMC uses Apple's documented `CAMetalLayer.developerHUDProperties` `mode=disabled` runtime control only while a recording is active, intercepts later HUD-property changes so the exclusion policy stays stable, and restores the layer's previous HUD dictionary on Stop. Enabling **Include Metal HUD in recording** leaves the HUD untouched so it can be burned into the captured video.
-
-### Additional cleanup
-
-Repeated Start commands no longer reset a live PTMC session or discard capture-layer restoration state. The direct-drawable Metal command queue is created during asynchronous session preparation instead of on the first captured frame. PlayCover also avoids a duplicate PTMC config write at launch, guarantees `isStarting` is cleared on every early-return/error path, uses asynchronous sleeps for app-lifecycle monitoring, and removes the stale `await` around the callback-based IPA picker.
-
-The present hot path also caches the active `CAMetalLayer` address so unchanged frames avoid an atomic Objective-C property lookup/exchange, accesses `CAMetalDrawable.layer` directly, and folds the optional present-bypass decision into the existing capture pass instead of re-reading the drawable texture and manager state a second time.
-
-PTMC also removes the per-frame Objective-C VideoToolbox callback-context allocation: callback metadata now lives on each preallocated IOSurface slot and is reused only after VideoToolbox releases that slot. This leaves the frame path without a per-frame PTMC context object allocation.
+1. Both working trees clean; neither branch behind its upstream base.
+2. PlayTools static + mac-build + SwiftLint succeed at the exact commit to ship.
+3. Update `Cartfile.resolved` and this file to that exact PlayTools commit.
+4. PlayCover SwiftLint + PTMC ad-hoc nightly succeed; artifact commit files match the intended PlayCover/PlayTools SHAs.
+5. Verify DMG SHA-256, then tag/release PlayTools and PlayCover with the same PTMC version.
+6. Update `EmilyTsum/homebrew-tap` cask to the released DMG SHA and require install/startup smoke success.
+7. Remove temporary build/download files and temporary PR refs. Keep the legacy overlay repository intact.
