@@ -234,6 +234,10 @@ struct MetalCaptureStatus {
     let outputPath: String?
     let drawableWidth: Int
     let drawableHeight: Int
+    let sourceWidth: Int
+    let sourceHeight: Int
+    let outputWidth: Int
+    let outputHeight: Int
     let presented: Int
     let captured: Int
     let encoded: Int
@@ -249,6 +253,9 @@ struct MetalCaptureStatus {
     let edr: Int
     let presentHookCount: Int
     let captureEnabled: Bool
+    let displaySuppressed: Bool
+    let captureResolutionMode: String
+    let memoryPath: String
     let colorSpace: String
 
     static func read(bundleIdentifier: String) -> MetalCaptureStatus? {
@@ -268,6 +275,10 @@ struct MetalCaptureStatus {
             outputPath: values["outputPath"] as? String,
             drawableWidth: integer("drawableWidth"),
             drawableHeight: integer("drawableHeight"),
+            sourceWidth: integer("sourceWidth"),
+            sourceHeight: integer("sourceHeight"),
+            outputWidth: integer("width"),
+            outputHeight: integer("height"),
             presented: integer("presented"),
             captured: integer("captured"),
             encoded: integer("encoded"),
@@ -283,6 +294,9 @@ struct MetalCaptureStatus {
             edr: integer("edr"),
             presentHookCount: integer("presentHookCount"),
             captureEnabled: (values["captureEnabled"] as? NSNumber)?.boolValue ?? false,
+            displaySuppressed: (values["displaySuppressed"] as? NSNumber)?.boolValue ?? false,
+            captureResolutionMode: values["captureResolutionMode"] as? String ?? "source",
+            memoryPath: values["memoryPath"] as? String ?? "unknown",
             colorSpace: values["colorSpace"] as? String ?? "unknown"
         )
     }
@@ -753,6 +767,53 @@ struct MetalCaptureView: View {
                         .frame(width: 180)
                     }
 
+                    HStack {
+                        Text("Capture resolution")
+                        Spacer()
+                        Picker("", selection: $settings.settings.metalCaptureResolutionMode) {
+                            Text("Source / native").tag("source")
+                            Text("2160p max").tag("2160p")
+                            Text("1440p max").tag("1440p")
+                            Text("1080p max").tag("1080p")
+                            Text("720p max").tag("720p")
+                            Text("Custom max").tag("custom")
+                        }
+                        .frame(width: 180)
+                    }
+
+                    if settings.settings.metalCaptureResolutionMode == "custom" {
+                        HStack {
+                            Text("Custom maximum size")
+                            Spacer()
+                            Stepper(
+                                value: $settings.settings.metalCaptureCustomWidth,
+                                in: 2...16_384,
+                                step: 2
+                            ) {
+                                Text("W \(settings.settings.metalCaptureCustomWidth)")
+                                    .monospacedDigit()
+                                    .frame(width: 90, alignment: .trailing)
+                            }
+                            Stepper(
+                                value: $settings.settings.metalCaptureCustomHeight,
+                                in: 2...16_384,
+                                step: 2
+                            ) {
+                                Text("H \(settings.settings.metalCaptureCustomHeight)")
+                                    .monospacedDigit()
+                                    .frame(width: 90, alignment: .trailing)
+                            }
+                        }
+                    }
+
+                    Text(
+                        "Capture scaling is performed on the GPU directly into IOSurface-backed encoder buffers. " +
+                        "PTMC does not read frames back through the CPU or allocate an intermediate full-frame " +
+                        "image. It preserves the source aspect ratio and never upscales above the game drawable."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                     Toggle("Record game audio", isOn: $settings.settings.metalCaptureAudioEnabled)
                         .help("Captures only the target game's audio with ScreenCaptureKit at 48 kHz stereo AAC.")
 
@@ -810,6 +871,14 @@ struct MetalCaptureView: View {
                     Toggle("Disable CAMetalLayer display synchronization",
                            isOn: $settings.settings.metalCaptureDisableDisplaySync)
                         .help("Optional frame-pacing diagnostic. Leave off unless the game presents at only 60 fps.")
+
+                    Toggle("Suppress on-screen game output while recording (experimental)",
+                           isOn: $settings.settings.metalCaptureSuppressDisplayOutput)
+                        .help(
+                            "Makes the capture CAMetalLayer transparent while still presenting drawables so they " +
+                            "recycle normally. This may let WindowServer cull visible composition work. The original " +
+                            "opacity is restored on Stop."
+                        )
 
                     Toggle("Force SDR presentation for capture",
                            isOn: $settings.settings.metalCaptureForceSDRDisplay)
@@ -938,6 +1007,18 @@ struct MetalCaptureView: View {
         .onChange(of: settings.settings.metalCaptureCodec) { _ in
             syncRuntimeConfiguration(command: "status")
         }
+        .onChange(of: settings.settings.metalCaptureResolutionMode) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
+        .onChange(of: settings.settings.metalCaptureCustomWidth) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
+        .onChange(of: settings.settings.metalCaptureCustomHeight) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
+        .onChange(of: settings.settings.metalCaptureSuppressDisplayOutput) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
         .onChange(of: settings.settings.metalCaptureFPS) { _ in
             syncRuntimeConfiguration(command: "status")
         }
@@ -993,12 +1074,21 @@ struct MetalCaptureView: View {
                     if status.drawableWidth > 0 && status.drawableHeight > 0 {
                         Text("drawable \(status.drawableWidth)×\(status.drawableHeight)")
                     }
+                    if status.outputWidth > 0 && status.outputHeight > 0 {
+                        Text("capture \(status.outputWidth)×\(status.outputHeight)")
+                    }
                     Text("last PTMC update \(statusAgeText(status)) ago")
                     if status.outputPath != nil {
                         Text("output path armed")
                     }
                 }
                 .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                Text(
+                    "GPU path: \(status.memoryPath) • display " +
+                    (status.displaySuppressed ? "suppressed" : "normal")
+                )
+                .font(.caption2)
                 .foregroundStyle(.secondary)
             }
 

@@ -2,7 +2,7 @@
 
 This branch follows upstream PlayCover `develop` and bundles the public `EmilyTsum/PlayTools` `metal-capture` branch.
 
-Pinned PlayTools commit at this revision: `fdaa1f5605d105f839832c9b0b4db68514a27b94`.
+Pinned PlayTools commit at this revision: `0c2dec2e4a96f092d3439b1c2abf18cb04925015`.
 
 ## User-facing control
 
@@ -61,3 +61,9 @@ The CLI uses the same targeted Darwin notifications and PTMC runtime plist as Pl
 For ProRes, PTMC uses a BGRA IOSurface ring and a direct Metal blit instead of running the full BGRA-to-NV12 compute conversion used by HEVC. This reduces PTMC GPU work; the Apple ProRes hardware encoder performs the required codec-side conversion.
 
 The optimized capture path uses a 2×2 HEVC BGRA→NV12 compute kernel, a direct BGRA blit path for ProRes, one-time capture-layer normalization with restoration on Stop, and native Metal dispatch whenever recording is inactive.
+
+### Capture resolution and GPU memory path
+
+Capture resolution is independent from the game drawable. `source`, 2160p, 1440p, 1080p, 720p, and custom maximum-size modes preserve aspect ratio and never upscale. HEVC downscales while converting BGRA directly to the IOSurface-backed NV12 VideoToolbox input; ProRes downscales directly into an IOSurface-backed BGRA input. There is no CPU frame readback or intermediate full-frame CPU copy.
+
+The optional experimental display-suppression mode sets only the capture CAMetalLayer opacity to zero while continuing to call the original present method so drawable recycling remains intact; Stop restores the original opacity and other presentation state.

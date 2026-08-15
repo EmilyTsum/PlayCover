@@ -49,6 +49,8 @@ jobs:
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_OUTPUT_DIR'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'prores422lt'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'frame hooks are dormant until Start'
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_RESOLUTION_MODE'
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_SUPPRESS_DISPLAY'
 
       - name: Typecheck PTMC CLI
         run: |
@@ -84,6 +86,8 @@ jobs:
           strings "$FRAME/PlayTools" | grep -F 'PTMC_OUTPUT_DIR'
           strings "$FRAME/PlayTools" | grep -F 'prores422lt'
           strings "$FRAME/PlayTools" | grep -F 'frame hooks are dormant until Start'
+          strings "$FRAME/PlayTools" | grep -F 'PTMC_RESOLUTION_MODE'
+          strings "$FRAME/PlayTools" | grep -F 'PTMC_SUPPRESS_DISPLAY'
           xcrun vtool -show-build "$FRAME/PlayTools"
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict "$APP"

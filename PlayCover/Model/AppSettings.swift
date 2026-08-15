@@ -57,6 +57,10 @@ struct AppSettingsData: Codable {
     var metalCaptureAutostart = false
     var metalCaptureCodec = "hevc"
     var metalCaptureAudioEnabled = true
+    var metalCaptureResolutionMode = "source"
+    var metalCaptureCustomWidth = 1920
+    var metalCaptureCustomHeight = 1080
+    var metalCaptureSuppressDisplayOutput = false
     var metalCaptureFPS = 120
     var metalCaptureBitrateMbps = 120
     var metalCaptureBuffers = 6
@@ -113,6 +117,14 @@ struct AppSettingsData: Codable {
         metalCaptureAutostart = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureAutostart) ?? false
         metalCaptureCodec = try container.decodeIfPresent(String.self, forKey: .metalCaptureCodec) ?? "hevc"
         metalCaptureAudioEnabled = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureAudioEnabled) ?? true
+        metalCaptureResolutionMode = try container.decodeIfPresent(
+            String.self, forKey: .metalCaptureResolutionMode) ?? "source"
+        metalCaptureCustomWidth = try container.decodeIfPresent(
+            Int.self, forKey: .metalCaptureCustomWidth) ?? 1920
+        metalCaptureCustomHeight = try container.decodeIfPresent(
+            Int.self, forKey: .metalCaptureCustomHeight) ?? 1080
+        metalCaptureSuppressDisplayOutput = try container.decodeIfPresent(
+            Bool.self, forKey: .metalCaptureSuppressDisplayOutput) ?? false
         metalCaptureFPS = try container.decodeIfPresent(Int.self, forKey: .metalCaptureFPS) ?? 120
         metalCaptureBitrateMbps = try container.decodeIfPresent(Int.self, forKey: .metalCaptureBitrateMbps) ?? 120
         metalCaptureBuffers = try container.decodeIfPresent(Int.self, forKey: .metalCaptureBuffers) ?? 6
