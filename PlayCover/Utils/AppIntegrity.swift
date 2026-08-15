@@ -34,10 +34,21 @@ class AppIntegrity: ObservableObject {
     private static var expectedUrl = URL(fileURLWithPath: "/Applications/PlayCover.app")
 
     private static var insideAppsFolder: Bool {
-        if let url = appUrl {
-            return url.path.contains("Xcode") || url.path.contains(expectedUrl.path)
-        }
-        return false
+        guard let url = appUrl else { return false }
+
+        let appURL = url.standardizedFileURL
+        let applicationsURL = expectedUrl.standardizedFileURL
+
+        // Homebrew casks expose apps through /Applications with a symlink whose target lives in
+        // the Caskroom. Bundle.main can report that resolved Caskroom path, so a string-only
+        // /Applications check incorrectly treats a valid Homebrew install as misplaced and can
+        // present the move-app alert before the main SwiftUI hierarchy has rendered.
+        let resolvedAppURL = appURL.resolvingSymlinksInPath()
+        let resolvedApplicationsURL = applicationsURL.resolvingSymlinksInPath()
+
+        return appURL.path.contains("Xcode") ||
+            appURL == applicationsURL ||
+            resolvedAppURL == resolvedApplicationsURL
     }
 
 }
