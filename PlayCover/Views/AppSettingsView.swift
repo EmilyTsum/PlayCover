@@ -341,6 +341,12 @@ extension MetalCaptureStatus {
 struct MetalCaptureAudioResult {
     let url: URL
     let firstHostTimeNs: UInt64
+    let droppedSamples: Int
+    let peakPendingSamples: Int
+    let backpressureEvents: Int
+    let sourceGapCount: Int
+    let sourceGapSeconds: Double
+    let passthroughPCM: Bool
 }
 
 private final class MetalCaptureSendableBox<Value>: @unchecked Sendable {
@@ -356,21 +362,47 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
     static let shared = MetalCaptureAudioRecorder()
 
     private(set) var droppedSamples = 0
+    private(set) var peakPendingSamples = 0
+    private(set) var backpressureEvents = 0
+    private(set) var sourceGapCount = 0
+    private(set) var sourceGapSeconds = 0.0
 
     private let sampleQueue = DispatchQueue(label: "io.playcover.ptmc.audio", qos: .userInitiated)
+    private let maxPendingSamples = 512
+    private let drainRetryNanoseconds: UInt64 = 4_000_000
     private var stream: SCStream?
     private var writer: AVAssetWriter?
     private var writerInput: AVAssetWriterInput?
     private var outputURL: URL?
     private var firstHostTimeNs: UInt64 = 0
     private var appendedSamples = 0
+    private var pendingSamples: [CMSampleBuffer] = []
+    private var pendingHead = 0
+    private var drainScheduled = false
+    private var backpressureActive = false
+    private var passthroughPCM = true
+    private var previousSampleEnd = CMTime.invalid
+
+    private var pendingSampleCount: Int {
+        max(0, pendingSamples.count - pendingHead)
+    }
 
     // swiftlint:disable:next function_body_length
     func start(bundleIdentifier: String) async throws {
         _ = await stop()
         droppedSamples = 0
+        peakPendingSamples = 0
+        backpressureEvents = 0
+        sourceGapCount = 0
+        sourceGapSeconds = 0
         firstHostTimeNs = 0
         appendedSamples = 0
+        pendingSamples.removeAll(keepingCapacity: true)
+        pendingHead = 0
+        drainScheduled = false
+        backpressureActive = false
+        passthroughPCM = true
+        previousSampleEnd = .invalid
 
         let content = try await SCShareableContent.excludingDesktopWindows(
             false,
@@ -395,39 +427,22 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         configuration.excludesCurrentProcessAudio = true
         configuration.sampleRate = 48_000
         configuration.channelCount = 2
-        // PTMC only subscribes to the audio output. Keep any internal screen work negligible.
+        // PTMC only subscribes to audio. Keep internal screen work tiny, but leave enough
+        // ScreenCaptureKit queue depth to absorb short host-scheduling hiccups.
         configuration.width = 2
         configuration.height = 2
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-        configuration.queueDepth = 2
+        configuration.queueDepth = 8
         configuration.showsCursor = false
 
         let directory = MetalCapturePaths.captureDirectory(for: bundleIdentifier)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let audioURL = directory.appendingPathComponent("PTMC-Audio-active.m4a")
+        let audioURL = directory.appendingPathComponent("PTMC-Audio-active.mov")
         try? FileManager.default.removeItem(at: audioURL)
-
-        let assetWriter = try AVAssetWriter(outputURL: audioURL, fileType: .m4a)
-        let input = AVAssetWriterInput(
-            mediaType: .audio,
-            outputSettings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 48_000,
-                AVNumberOfChannelsKey: 2,
-                AVEncoderBitRateKey: 256_000
-            ]
-        )
-        input.expectsMediaDataInRealTime = true
-        guard assetWriter.canAdd(input) else {
-            throw "PTMC audio: AVAssetWriter rejected the AAC input"
-        }
-        assetWriter.add(input)
 
         let captureStream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try captureStream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
 
-        writer = assetWriter
-        writerInput = input
         outputURL = audioURL
         stream = captureStream
         try await captureStream.startCapture()
@@ -444,38 +459,14 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
             }
         }
 
-        let result: MetalCaptureAudioResult? = await withCheckedContinuation { continuation in
+        return await withCheckedContinuation { continuation in
             sampleQueue.async {
-                guard let writer = self.writer,
-                      let input = self.writerInput,
-                      let url = self.outputURL,
-                      self.appendedSamples > 0 else {
-                    if let url = self.outputURL { try? FileManager.default.removeItem(at: url) }
-                    self.clearWriterState()
-                    continuation.resume(returning: nil)
-                    return
-                }
-                input.markAsFinished()
-                let writerBox = MetalCaptureSendableBox(writer)
-                writer.finishWriting {
-                    let writer = writerBox.value
-                    let completed = writer.status == .completed
-                    let result = completed
-                        ? MetalCaptureAudioResult(url: url, firstHostTimeNs: self.firstHostTimeNs)
-                        : nil
-                    if !completed {
-                        Log.shared.log(
-                            "PTMC audio writer failed: \(writer.error?.localizedDescription ?? "unknown error")",
-                            isError: true
-                        )
-                        try? FileManager.default.removeItem(at: url)
-                    }
-                    self.clearWriterState()
-                    continuation.resume(returning: result)
-                }
+                self.finishWriterWhenDrained(
+                    deadlineNanoseconds: DispatchTime.now().uptimeNanoseconds + 5_000_000_000,
+                    continuation: continuation
+                )
             }
         }
-        return result
     }
 
     func stream(
@@ -483,34 +474,212 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of outputType: SCStreamOutputType
     ) {
-        guard outputType == .audio,
-              sampleBuffer.isValid,
-              let writer,
-              let input = writerInput else { return }
+        guard outputType == .audio, sampleBuffer.isValid else { return }
 
         if firstHostTimeNs == 0 {
             firstHostTimeNs = DispatchTime.now().uptimeNanoseconds
         }
-        if writer.status == .unknown {
-            guard writer.startWriting() else {
-                return
-            }
-            writer.startSession(atSourceTime: sampleBuffer.presentationTimeStamp)
-        }
-        guard writer.status == .writing else { return }
-        guard input.isReadyForMoreMediaData else {
+        observeSourceTiming(sampleBuffer)
+        guard prepareWriterIfNeeded(for: sampleBuffer) else {
             droppedSamples += 1
             return
         }
-        if input.append(sampleBuffer) {
-            appendedSamples += 1
-        } else {
+
+        guard pendingSampleCount < maxPendingSamples else {
             droppedSamples += 1
+            return
         }
+        pendingSamples.append(sampleBuffer)
+        peakPendingSamples = max(peakPendingSamples, pendingSampleCount)
+        drainPendingSamples()
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         Log.shared.log("PTMC audio stream stopped: \(error.localizedDescription)", isError: true)
+    }
+
+
+    private func observeSourceTiming(_ sampleBuffer: CMSampleBuffer) {
+        let timestamp = sampleBuffer.presentationTimeStamp
+        let duration = sampleBuffer.duration
+        if previousSampleEnd.isValid, timestamp.isValid {
+            let gap = CMTimeSubtract(timestamp, previousSampleEnd)
+            let tolerance = CMTime(value: 2, timescale: 1_000)
+            if gap.isNumeric, CMTimeCompare(gap, tolerance) > 0 {
+                sourceGapCount += 1
+                sourceGapSeconds += max(0, CMTimeGetSeconds(gap))
+            }
+        }
+        if timestamp.isValid, duration.isValid, CMTimeCompare(duration, .zero) > 0 {
+            previousSampleEnd = CMTimeAdd(timestamp, duration)
+        } else if timestamp.isValid {
+            previousSampleEnd = timestamp
+        }
+    }
+
+    private func prepareWriterIfNeeded(for sampleBuffer: CMSampleBuffer) -> Bool {
+        if writer != nil { return true }
+        guard let url = outputURL,
+              let formatDescription = sampleBuffer.formatDescription else { return false }
+
+        do {
+            let assetWriter = try AVAssetWriter(outputURL: url, fileType: .mov)
+            let passthroughInput = AVAssetWriterInput(
+                mediaType: .audio,
+                outputSettings: nil,
+                sourceFormatHint: formatDescription
+            )
+            passthroughInput.expectsMediaDataInRealTime = true
+
+            let selectedInput: AVAssetWriterInput
+            if assetWriter.canAdd(passthroughInput) {
+                selectedInput = passthroughInput
+                passthroughPCM = true
+            } else {
+                let fallbackInput = AVAssetWriterInput(
+                    mediaType: .audio,
+                    outputSettings: [
+                        AVFormatIDKey: kAudioFormatMPEG4AAC,
+                        AVSampleRateKey: 48_000,
+                        AVNumberOfChannelsKey: 2,
+                        AVEncoderBitRateKey: 256_000
+                    ],
+                    sourceFormatHint: formatDescription
+                )
+                fallbackInput.expectsMediaDataInRealTime = true
+                guard assetWriter.canAdd(fallbackInput) else { return false }
+                selectedInput = fallbackInput
+                passthroughPCM = false
+            }
+
+            assetWriter.add(selectedInput)
+            guard assetWriter.startWriting() else {
+                Log.shared.log(
+                    "PTMC audio writer failed to start: \(assetWriter.error?.localizedDescription ?? "unknown error")",
+                    isError: true
+                )
+                return false
+            }
+            assetWriter.startSession(atSourceTime: sampleBuffer.presentationTimeStamp)
+            writer = assetWriter
+            writerInput = selectedInput
+            return true
+        } catch {
+            Log.shared.log("PTMC audio writer setup failed: \(error.localizedDescription)", isError: true)
+            return false
+        }
+    }
+
+    private func drainPendingSamples(scheduleRetry: Bool = true) {
+        guard let writer, let input = writerInput, writer.status == .writing else { return }
+
+        while pendingHead < pendingSamples.count && input.isReadyForMoreMediaData {
+            let sample = pendingSamples[pendingHead]
+            pendingHead += 1
+            if input.append(sample) {
+                appendedSamples += 1
+            } else {
+                droppedSamples += 1
+            }
+        }
+
+        compactPendingSamples()
+        if pendingSampleCount > 0 {
+            if !backpressureActive {
+                backpressureActive = true
+                backpressureEvents += 1
+            }
+            if scheduleRetry { scheduleDrain() }
+        } else {
+            backpressureActive = false
+        }
+    }
+
+    private func scheduleDrain() {
+        guard !drainScheduled else { return }
+        drainScheduled = true
+        sampleQueue.asyncAfter(deadline: .now() + .nanoseconds(Int(drainRetryNanoseconds))) { [weak self] in
+            guard let self else { return }
+            self.drainScheduled = false
+            self.drainPendingSamples()
+        }
+    }
+
+    private func compactPendingSamples() {
+        if pendingHead == pendingSamples.count {
+            pendingSamples.removeAll(keepingCapacity: true)
+            pendingHead = 0
+        } else if pendingHead >= 128 && pendingHead * 2 >= pendingSamples.count {
+            pendingSamples.removeFirst(pendingHead)
+            pendingHead = 0
+        }
+    }
+
+    private func finishWriterWhenDrained(
+        deadlineNanoseconds: UInt64,
+        continuation: CheckedContinuation<MetalCaptureAudioResult?, Never>
+    ) {
+        drainPendingSamples(scheduleRetry: false)
+        if pendingSampleCount > 0, DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds {
+            sampleQueue.asyncAfter(deadline: .now() + .milliseconds(5)) { [weak self] in
+                self?.finishWriterWhenDrained(
+                    deadlineNanoseconds: deadlineNanoseconds,
+                    continuation: continuation
+                )
+            }
+            return
+        }
+
+        if pendingSampleCount > 0 {
+            droppedSamples += pendingSampleCount
+            pendingSamples.removeAll(keepingCapacity: true)
+            pendingHead = 0
+        }
+
+        guard let writer,
+              let input = writerInput,
+              let url = outputURL,
+              appendedSamples > 0 else {
+            if let url = outputURL { try? FileManager.default.removeItem(at: url) }
+            clearWriterState()
+            continuation.resume(returning: nil)
+            return
+        }
+
+        input.markAsFinished()
+        let writerBox = MetalCaptureSendableBox(writer)
+        let resultDrops = droppedSamples
+        let resultPeakPending = peakPendingSamples
+        let resultBackpressure = backpressureEvents
+        let resultSourceGapCount = sourceGapCount
+        let resultSourceGapSeconds = sourceGapSeconds
+        let resultFirstHostTimeNs = firstHostTimeNs
+        let resultPassthroughPCM = passthroughPCM
+        writer.finishWriting {
+            let writer = writerBox.value
+            let completed = writer.status == .completed
+            let result = completed
+                ? MetalCaptureAudioResult(
+                    url: url,
+                    firstHostTimeNs: resultFirstHostTimeNs,
+                    droppedSamples: resultDrops,
+                    peakPendingSamples: resultPeakPending,
+                    backpressureEvents: resultBackpressure,
+                    sourceGapCount: resultSourceGapCount,
+                    sourceGapSeconds: resultSourceGapSeconds,
+                    passthroughPCM: resultPassthroughPCM
+                )
+                : nil
+            if !completed {
+                Log.shared.log(
+                    "PTMC audio writer failed: \(writer.error?.localizedDescription ?? "unknown error")",
+                    isError: true
+                )
+                try? FileManager.default.removeItem(at: url)
+            }
+            self.clearWriterState()
+            continuation.resume(returning: result)
+        }
     }
 
     private func clearWriterState() {
@@ -519,6 +688,11 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         outputURL = nil
         firstHostTimeNs = 0
         appendedSamples = 0
+        pendingSamples.removeAll(keepingCapacity: true)
+        pendingHead = 0
+        drainScheduled = false
+        backpressureActive = false
+        previousSampleEnd = .invalid
     }
 }
 
@@ -558,7 +732,8 @@ enum MetalCaptureControl {
                     options: [.skipsHiddenFiles]
                 )
                 for source in files where source.pathExtension.lowercased() == "mov" &&
-                    !source.lastPathComponent.hasSuffix(".partial.mov") {
+                    !source.lastPathComponent.hasSuffix(".partial.mov") &&
+                    !source.lastPathComponent.hasPrefix("PTMC-Audio-") {
                     var destination = destinationDirectory.appendingPathComponent(source.lastPathComponent)
                     var suffix = 1
                     while fileManager.fileExists(atPath: destination.path) {
@@ -858,7 +1033,11 @@ struct MetalCaptureView: View {
                     .foregroundStyle(.secondary)
 
                     Toggle("Record game audio", isOn: $settings.settings.metalCaptureAudioEnabled)
-                        .help("Captures only the target game's audio with ScreenCaptureKit at 48 kHz stereo AAC.")
+                        .help(
+                            "Captures only the target game audio with ScreenCaptureKit at 48 kHz stereo. " +
+                            "PTMC buffers short writer stalls and prefers PCM passthrough during recording " +
+                            "to avoid real-time AAC encoder contention."
+                        )
 
                     Toggle("Include Metal HUD in recording", isOn: $settings.settings.metalCaptureIncludeHUD)
                         .help(
@@ -1292,9 +1471,19 @@ struct MetalCaptureView: View {
                 audioState = "finalizing"
             }
             audioResult = await MetalCaptureAudioRecorder.shared.stop()
-            audioState = audioResult == nil
-                ? (settings.settings.metalCaptureAudioEnabled ? "none" : "disabled")
-                : "muxing"
+            if let audioResult {
+                audioState = "muxing • drop \(audioResult.droppedSamples) • source gaps \(audioResult.sourceGapCount)"
+                Log.shared.log(
+                    "PTMC audio finalized: drops=\(audioResult.droppedSamples) " +
+                    "peakQueue=\(audioResult.peakPendingSamples) " +
+                    "backpressure=\(audioResult.backpressureEvents) " +
+                    "sourceGaps=\(audioResult.sourceGapCount) " +
+                    "sourceGapMs=\(String(format: "%.1f", audioResult.sourceGapSeconds * 1000)) " +
+                    "path=\(audioResult.passthroughPCM ? "PCM passthrough" : "AAC fallback")"
+                )
+            } else {
+                audioState = settings.settings.metalCaptureAudioEnabled ? "none" : "disabled"
+            }
         }
         MetalCaptureControl.exportAfterFinalization(
             bundleIdentifier: app.info.bundleIdentifier,
