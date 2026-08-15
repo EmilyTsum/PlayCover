@@ -498,6 +498,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
     }
 }
 
+@available(macOS 13.0, *)
 private extension MetalCaptureAudioRecorder {
     func observeSourceTiming(_ sampleBuffer: CMSampleBuffer) {
         let timestamp = sampleBuffer.presentationTimeStamp
