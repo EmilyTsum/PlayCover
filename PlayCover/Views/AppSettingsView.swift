@@ -903,7 +903,6 @@ struct MetalCaptureView: View {
                             "recycle normally. This may let WindowServer cull visible composition work. The original " +
                             "opacity is restored on Stop."
                         )
-
                     Toggle("Skip display present while recording (unsafe experiment)",
                            isOn: $settings.settings.metalCaptureSkipDisplayPresent)
                         .help(
