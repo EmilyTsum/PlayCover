@@ -273,6 +273,7 @@ struct MetalCaptureStatus {
     let memoryPath: String
     let colorSpace: String
 
+    // swiftlint:disable:next function_body_length
     static func read(bundleIdentifier: String) -> MetalCaptureStatus? {
         let url = MetalCapturePaths.statusFile(for: bundleIdentifier)
         guard let data = try? Data(contentsOf: url),
