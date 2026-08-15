@@ -33,32 +33,48 @@ class Cacher {
     }
 
     func resolveITunesData(_ link: String) async {
-        if let refreshedITunesData = await getITunesData(link) {
-            try? cache.write(codable: refreshedITunesData, forKey: link)
-        }
+        _ = await getITunesData(link)
     }
 
     func resolveLocalIcon(_ app: PlayApp) -> NSImage? {
-        var bestResImage: NSImage?
-        let compareStr = app.info.bundleIdentifier + app.info.bundleVersion
+        resolveLocalIcon(
+            at: app.url,
+            bundleIdentifier: app.info.bundleIdentifier,
+            bundleVersion: app.info.bundleVersion,
+            primaryIconName: app.info.primaryIconName
+        )
+    }
 
-        app.url.enumerateContents(blocking: false) { file, _ in
-            if file.lastPathComponent.contains(app.info.primaryIconName), let icon = NSImage(contentsOf: file),
-               self.checkImageDimensions(icon, bestResImage) {
-                bestResImage = icon
-            }
+    func resolveLocalIcon(
+        at url: URL,
+        bundleIdentifier: String,
+        bundleVersion: String,
+        primaryIconName: String
+    ) -> NSImage? {
+        let compareStr = bundleIdentifier + bundleVersion
+        if cache.readString(forKey: compareStr) != nil,
+           let cachedImage = cache.readImage(forKey: bundleIdentifier) {
+            return cachedImage
         }
 
-        if let assetsExtractor = try? AssetsExtractor(appUrl: app.url) {
-            for icon in assetsExtractor.extractIcons() where checkImageDimensions(icon, bestResImage) {
-                bestResImage = icon
+        let lock = NSLock()
+        var candidates: [NSImage] = []
+        url.enumerateContents(blocking: true) { file, _ in
+            guard file.lastPathComponent.contains(primaryIconName), let icon = NSImage(contentsOf: file) else {
+                return
             }
+            lock.lock()
+            candidates.append(icon)
+            lock.unlock()
         }
+
+        if let assetsExtractor = try? AssetsExtractor(appUrl: url) {
+            candidates.append(contentsOf: assetsExtractor.extractIcons())
+        }
+        let bestResImage = candidates.max { $0.size.height < $1.size.height }
         cache.write(string: compareStr, forKey: compareStr)
-        if let image = bestResImage {
-            cache.write(image: image, forKey: app.info.bundleIdentifier)
-        }
-        return cache.readImage(forKey: app.info.bundleIdentifier)
+        if let image = bestResImage { cache.write(image: image, forKey: bundleIdentifier) }
+        return cache.readImage(forKey: bundleIdentifier)
     }
 
     func getLocalIcon(bundleId: String) -> NSImage? {
@@ -69,9 +85,6 @@ class Cacher {
         }
     }
 
-    private func checkImageDimensions(_ new: NSImage, _ currentBest: NSImage?) -> Bool {
-        return new.size.height > currentBest?.size.height ?? -1
-    }
 }
 
 extension URLCache {

@@ -144,6 +144,7 @@ struct AppSettingsView: View {
                 }
             }
             .frame(minWidth: 500, minHeight: 250)
+            .opacity(hasPlayTools != nil ? 1 : 0)
             HStack {
                 Spacer()
                 Button("settings.resetSettings") {

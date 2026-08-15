@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import DataCache
 
 struct PlayAppView: View {
 
@@ -125,7 +124,6 @@ struct PlayAppConditionalView: View {
     @State var isList: Bool
     @State var hasPlayTools: Bool?
 
-    @State private var cache = DataCache.instance
 
     var body: some View {
         Group {
@@ -228,13 +226,18 @@ struct PlayAppConditionalView: View {
             }
         }
         .task(priority: .userInitiated) {
-            let compareStr = app.info.bundleIdentifier + app.info.bundleVersion
-            if cache.readImage(forKey: app.info.bundleIdentifier) != nil
-                && cache.readString(forKey: compareStr) != nil {
-                appIcon = cache.readImage(forKey: app.info.bundleIdentifier)
-            } else {
-                appIcon = Cacher.shared.resolveLocalIcon(app)
-            }
+            let appURL = app.url
+            let bundleIdentifier = app.info.bundleIdentifier
+            let bundleVersion = app.info.bundleVersion
+            let primaryIconName = app.info.primaryIconName
+            appIcon = await Task.detached(priority: .utility) {
+                Cacher.shared.resolveLocalIcon(
+                    at: appURL,
+                    bundleIdentifier: bundleIdentifier,
+                    bundleVersion: bundleVersion,
+                    primaryIconName: primaryIconName
+                )
+            }.value
         }
         .task(priority: .background) {
             hasPlayTools = app.hasPlayTools()
