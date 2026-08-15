@@ -14,6 +14,40 @@ enum BlockingTask {
 }
 
 // swiftlint:disable file_length
+
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case keymapping
+    case graphics
+    case capture
+    case bypasses
+    case misc
+    case info
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .keymapping: return "Keymap"
+        case .graphics: return "Graphics"
+        case .capture: return "Capture"
+        case .bypasses: return "Bypass"
+        case .misc: return "Misc"
+        case .info: return "Info"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .keymapping: return "keyboard"
+        case .graphics: return "display"
+        case .capture: return "record.circle"
+        case .bypasses: return "shield"
+        case .misc: return "gearshape"
+        case .info: return "info.circle"
+        }
+    }
+}
+
 struct AppSettingsView: View {
     @Environment(\.dismiss) var dismiss
 
@@ -29,6 +63,7 @@ struct AppSettingsView: View {
 
     @State private var currentTask = BlockingTask.none
     @State private var cache = DataCache.instance
+    @State private var selectedSection = SettingsSection.keymapping
 
     var body: some View {
         VStack {
@@ -76,45 +111,45 @@ struct AppSettingsView: View {
                 appIcon = cache.readImage(forKey: viewModel.app.info.bundleIdentifier)
             }
 
-            TabView {
-                KeymappingView(settings: $viewModel.settings)
-                    .tabItem {
-                        Text("settings.tab.km")
-                    }
-                    .disabled(!(hasPlayTools ?? true))
-                GraphicsView(settings: $viewModel.settings)
-                    .tabItem {
-                        Text("settings.tab.graphics")
-                    }
-                    .disabled(!(hasPlayTools ?? true))
-                MetalCaptureView(settings: $viewModel.settings,
-                                 app: viewModel.app,
-                                 hasPlayTools: hasPlayTools)
-                    .tabItem {
-                        Text("Capture")
-                    }
-                BypassesView(settings: $viewModel.settings,
+            Picker("Settings section", selection: $selectedSection) {
+                ForEach(SettingsSection.allCases) { section in
+                    Label(section.title, systemImage: section.systemImage)
+                        .tag(section)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: .infinity)
+
+            Group {
+                switch selectedSection {
+                case .keymapping:
+                    KeymappingView(settings: $viewModel.settings)
+                        .disabled(!(hasPlayTools ?? true))
+                case .graphics:
+                    GraphicsView(settings: $viewModel.settings)
+                        .disabled(!(hasPlayTools ?? true))
+                case .capture:
+                    MetalCaptureView(settings: viewModel.settings,
+                                     app: viewModel.app,
+                                     hasPlayTools: hasPlayTools)
+                case .bypasses:
+                    BypassesView(settings: $viewModel.settings,
+                                 hasPlayTools: $hasPlayTools,
+                                 task: $currentTask,
+                                 app: viewModel.app)
+                        .disabled(!(hasPlayTools ?? true))
+                case .misc:
+                    MiscView(settings: $viewModel.settings,
+                             closeView: $closeView,
                              hasPlayTools: $hasPlayTools,
+                             hasAlias: $hasAlias,
                              task: $currentTask,
-                             app: viewModel.app)
-                    .tabItem {
-                        Text("settings.tab.bypasses")
-                    }
-                    .disabled(!(hasPlayTools ?? true))
-                MiscView(settings: $viewModel.settings,
-                         closeView: $closeView,
-                         hasPlayTools: $hasPlayTools,
-                         hasAlias: $hasAlias,
-                         task: $currentTask,
-                         app: viewModel.app,
-                         applicationCategoryType: viewModel.app.info.applicationCategoryType)
-                    .tabItem {
-                        Text("settings.tab.misc")
-                    }
-                InfoView(info: viewModel.app.info, hasPlayTools: (hasPlayTools ?? true))
-                    .tabItem {
-                        Text("settings.tab.info")
-                    }
+                             app: viewModel.app,
+                             applicationCategoryType: viewModel.app.info.applicationCategoryType)
+                case .info:
+                    InfoView(info: viewModel.app.info, hasPlayTools: (hasPlayTools ?? true))
+                }
             }
             .frame(minWidth: 500, minHeight: 250)
             HStack {
@@ -215,7 +250,7 @@ enum MetalCaptureControl {
 }
 
 struct MetalCaptureView: View {
-    @Binding var settings: AppSettings
+    @ObservedObject var settings: AppSettings
     let app: PlayApp
     let hasPlayTools: Bool?
 

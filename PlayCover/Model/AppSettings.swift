@@ -6,6 +6,7 @@
 import AppKit
 import Foundation
 import UniformTypeIdentifiers
+import Combine
 
 struct AppSettingsData: Codable {
     var bundleIdentifier: String = ""
@@ -118,7 +119,7 @@ struct AppSettingsData: Codable {
     }
 }
 
-class AppSettings {
+class AppSettings: ObservableObject {
     static var appSettingsDir: URL {
         let settingsFolder =
             PlayTools.playCoverContainer.appendingPathComponent("App Settings")
@@ -138,7 +139,7 @@ class AppSettings {
     let settingsUrl: URL
     var openWithLLDB: Bool = false
     var openLLDBWithTerminal: Bool = true
-    var settings: AppSettingsData {
+    @Published var settings: AppSettingsData {
         didSet {
             encode()
         }
