@@ -229,14 +229,15 @@ struct PlayAppConditionalView: View {
             let bundleIdentifier = app.info.bundleIdentifier
             let bundleVersion = app.info.bundleVersion
             let primaryIconName = app.info.primaryIconName
-            appIcon = await Task.detached(priority: .utility) {
-                Cacher.shared.resolveLocalIcon(
+            let iconData = await Task.detached(priority: .utility) {
+                Cacher.shared.resolveLocalIconData(
                     at: appURL,
                     bundleIdentifier: bundleIdentifier,
                     bundleVersion: bundleVersion,
                     primaryIconName: primaryIconName
                 )
             }.value
+            appIcon = iconData.flatMap(NSImage.init(data:))
         }
         .task(priority: .background) {
             hasPlayTools = app.hasPlayTools()

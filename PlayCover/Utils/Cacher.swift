@@ -77,6 +77,20 @@ class Cacher {
         return cache.readImage(forKey: bundleIdentifier)
     }
 
+    func resolveLocalIconData(
+        at url: URL,
+        bundleIdentifier: String,
+        bundleVersion: String,
+        primaryIconName: String
+    ) -> Data? {
+        resolveLocalIcon(
+            at: url,
+            bundleIdentifier: bundleIdentifier,
+            bundleVersion: bundleVersion,
+            primaryIconName: primaryIconName
+        )?.tiffRepresentation
+    }
+
     func getLocalIcon(bundleId: String) -> NSImage? {
         if let app = AppsVM.shared.apps.first(where: { $0.info.bundleIdentifier == bundleId }) {
             return cache.readImage(forKey: app.info.bundleIdentifier)
