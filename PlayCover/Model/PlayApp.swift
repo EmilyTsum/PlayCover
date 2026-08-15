@@ -34,6 +34,7 @@ enum MetalCapturePaths {
             "enabled": settings.metalCaptureEnabled,
             "autostart": settings.metalCaptureAutostart,
             "codec": settings.metalCaptureCodec,
+            "includeMetalHUDInCapture": settings.metalCaptureIncludeHUD,
             "resolutionMode": settings.metalCaptureResolutionMode,
             "captureWidth": min(max(settings.metalCaptureCustomWidth, 2), 16_384),
             "captureHeight": min(max(settings.metalCaptureCustomHeight, 2), 16_384),
@@ -136,8 +137,9 @@ class PlayApp: BaseApp {
 
     // MARK: - Launch
     func launch() async {
+        isStarting = true
+        defer { isStarting = false }
         do {
-            isStarting = true
 
             if prohibitedToPlay {
                 await clearAllCache()
@@ -183,7 +185,6 @@ class PlayApp: BaseApp {
                     runAppExec() // Splitting to reduce complexity
                 }
             }
-            isStarting = false
         } catch {
             Log.shared.error(error)
         }
@@ -234,11 +235,6 @@ extension PlayApp {
                 isError: true
             )
         }
-
-        MetalCapturePaths.writeRuntimeConfig(
-            bundleIdentifier: info.bundleIdentifier,
-            settings: settings.settings
-        )
 
         let config = NSWorkspace.OpenConfiguration()
 
@@ -298,9 +294,9 @@ extension PlayApp {
                     } else {
                         self.enableTimeOut()
                     }
-                    sleep(1)
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
                 }
-                sleep(1)
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
             // Things that are run after the app is closed.
             self.lockKeyCover()
@@ -325,6 +321,7 @@ extension PlayApp {
             "PTMC_ENABLE": capture.metalCaptureEnabled ? "1" : "0",
             "PTMC_AUTOSTART": capture.metalCaptureEnabled && capture.metalCaptureAutostart ? "1" : "0",
             "PTMC_CODEC": capture.metalCaptureCodec,
+            "PTMC_CAPTURE_METAL_HUD": capture.metalCaptureIncludeHUD ? "1" : "0",
             "PTMC_RESOLUTION_MODE": capture.metalCaptureResolutionMode,
             "PTMC_CAPTURE_WIDTH": String(min(max(capture.metalCaptureCustomWidth, 2), 16_384)),
             "PTMC_CAPTURE_HEIGHT": String(min(max(capture.metalCaptureCustomHeight, 2), 16_384)),

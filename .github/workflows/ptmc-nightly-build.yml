@@ -54,6 +54,7 @@ jobs:
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_SKIP_DISPLAY_PRESENT'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'samplingSkipPerSecond'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'presentFPS'
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_CAPTURE_METAL_HUD'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'burstSlotUses'
 
       - name: Typecheck PTMC CLI
@@ -95,6 +96,7 @@ jobs:
           strings "$FRAME/PlayTools" | grep -F 'PTMC_SKIP_DISPLAY_PRESENT'
           strings "$FRAME/PlayTools" | grep -F 'samplingSkipPerSecond'
           strings "$FRAME/PlayTools" | grep -F 'presentFPS'
+          strings "$FRAME/PlayTools" | grep -F 'PTMC_CAPTURE_METAL_HUD'
           strings "$FRAME/PlayTools" | grep -F 'burstSlotUses'
           xcrun vtool -show-build "$FRAME/PlayTools"
           codesign --force --deep --sign - "$APP"

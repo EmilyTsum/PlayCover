@@ -199,6 +199,12 @@ private func configure(_ bundle: String, options: ArraySlice<String>) throws {
             }
             runtime["skipDisplayPresent"] = flag
             app["metalCaptureSkipDisplayPresent"] = flag
+        case "includeHUD":
+            guard let flag = boolValue(value) else {
+                throw PTMCCLIError.message("includeHUD must be true/false")
+            }
+            runtime["includeMetalHUDInCapture"] = flag
+            app["metalCaptureIncludeHUD"] = flag
         default:
             throw PTMCCLIError.message("unknown config key: \(key)")
         }
@@ -268,7 +274,7 @@ private func usage() -> Never {
       record  <bundle-id> [seconds]
       config  <bundle-id> [fps=120 bitrateMbps=120 buffers=6 codec=hevc]
                           [resolution=source|2160p|1440p|1080p|720p|custom width=1920 height=1080]
-                          [forceSDR=true disableSync=false suppressDisplay=false skipPresent=false]
+                          [forceSDR=true disableSync=false suppressDisplay=false skipPresent=false includeHUD=false]
       inspect <bundle-id>
 
     `record` controls the in-game PTMC video runtime. Game-audio capture is owned by the PlayCover UI

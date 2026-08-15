@@ -8,7 +8,7 @@
 import SwiftUI
 import DataCache
 import CoreFoundation
-import AVFoundation
+@preconcurrency import AVFoundation
 import ScreenCaptureKit
 
 enum BlockingTask {
@@ -263,6 +263,8 @@ struct MetalCaptureStatus {
     let captureEnabled: Bool
     let displaySuppressed: Bool
     let displayPresentSkipped: Bool
+    let includeMetalHUDInCapture: Bool
+    let metalHUDSuppressed: Bool
     let skippedPresents: Int
     let ownedCaptureCommandBuffers: Int
     let lastOwnedCaptureGPUTimeUs: Int
@@ -317,6 +319,8 @@ struct MetalCaptureStatus {
             captureEnabled: (values["captureEnabled"] as? NSNumber)?.boolValue ?? false,
             displaySuppressed: (values["displaySuppressed"] as? NSNumber)?.boolValue ?? false,
             displayPresentSkipped: (values["displayPresentSkipped"] as? NSNumber)?.boolValue ?? false,
+            includeMetalHUDInCapture: (values["includeMetalHUDInCapture"] as? NSNumber)?.boolValue ?? false,
+            metalHUDSuppressed: (values["metalHUDSuppressed"] as? NSNumber)?.boolValue ?? false,
             skippedPresents: integer("skippedPresents"),
             ownedCaptureCommandBuffers: integer("ownedCaptureCommandBuffers"),
             lastOwnedCaptureGPUTimeUs: integer("lastOwnedCaptureGPUTimeUs"),
@@ -338,7 +342,7 @@ struct MetalCaptureAudioResult {
 }
 
 @available(macOS 13.0, *)
-final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
+final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     static let shared = MetalCaptureAudioRecorder()
 
     private(set) var droppedSamples = 0
@@ -843,6 +847,13 @@ struct MetalCaptureView: View {
                     Toggle("Record game audio", isOn: $settings.settings.metalCaptureAudioEnabled)
                         .help("Captures only the target game's audio with ScreenCaptureKit at 48 kHz stereo AAC.")
 
+                    Toggle("Include Metal HUD in recording", isOn: $settings.settings.metalCaptureIncludeHUD)
+                        .help(
+                            "Off by default. PTMC temporarily hides the target CAMetalLayer's Metal Performance HUD " +
+                            "while recording, then restores its previous HUD configuration on Stop. " +
+                            "Turn this on only when you want HUD diagnostics burned into the captured video."
+                        )
+
                     HStack {
                         Text("Capture frame rate")
                         Spacer()
@@ -1038,6 +1049,9 @@ struct MetalCaptureView: View {
         .onChange(of: settings.settings.metalCaptureForceSDRDisplay) { _ in
             syncRuntimeConfiguration(command: "status")
         }
+        .onChange(of: settings.settings.metalCaptureIncludeHUD) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
         .onChange(of: settings.settings.metalCaptureDisableDisplaySync) { _ in
             syncRuntimeConfiguration(command: "status")
         }
@@ -1162,6 +1176,15 @@ struct MetalCaptureView: View {
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
                 }
+                Text(
+                    status.includeMetalHUDInCapture
+                        ? "Metal HUD: included in capture"
+                        : (status.metalHUDSuppressed
+                            ? "Metal HUD: excluded during recording (restored on Stop)"
+                            : "Metal HUD: exclusion armed")
+                )
+                .font(.caption2)
+                .foregroundStyle(.secondary)
                 Text(
                     "GPU path: \(status.memoryPath) • display " +
                     (status.displayPresentSkipped ? "present bypass" :

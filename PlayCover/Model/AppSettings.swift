@@ -57,6 +57,7 @@ struct AppSettingsData: Codable {
     var metalCaptureAutostart = false
     var metalCaptureCodec = "hevc"
     var metalCaptureAudioEnabled = true
+    var metalCaptureIncludeHUD = false
     var metalCaptureResolutionMode = "source"
     var metalCaptureCustomWidth = 1920
     var metalCaptureCustomHeight = 1080
@@ -118,6 +119,7 @@ struct AppSettingsData: Codable {
         metalCaptureAutostart = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureAutostart) ?? false
         metalCaptureCodec = try container.decodeIfPresent(String.self, forKey: .metalCaptureCodec) ?? "hevc"
         metalCaptureAudioEnabled = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureAudioEnabled) ?? true
+        metalCaptureIncludeHUD = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureIncludeHUD) ?? false
         metalCaptureResolutionMode = try container.decodeIfPresent(
             String.self, forKey: .metalCaptureResolutionMode) ?? "source"
         metalCaptureCustomWidth = try container.decodeIfPresent(

@@ -67,39 +67,37 @@ struct PlayCoverViewMenuView: Commands {
         CommandGroup(replacing: .newItem) {}
         CommandGroup(replacing: .importExport) {
             Button("menubar.exportToSideloady", systemImage: "square.and.arrow.up.fill") {
-                Task {
-                    if InstallVM.shared.inProgress {
-                        Log.shared.error(PlayCoverError.waitInstallation)
-                    } else if DownloadVM.shared.inProgress {
-                        Log.shared.error(PlayCoverError.waitDownload)
-                    } else {
-                        // remove await for Swift 6 (no async operation occurs)
-                        await NSOpenPanel.selectIPA { result in
-                            if case .success(let url) = result {
-                                Task {
-                                    Installer.install(ipaUrl: url,
-                                                            export: true,
-                                                            returnCompletion: { ipa in
-                                        Task { @MainActor in
-                                            if let ipa = ipa {
-                                                ipa.showInFinder()
-                                                let config = NSWorkspace.OpenConfiguration()
-                                                config.promptsUserIfNeeded = true
-                                                let url = NSWorkspace.shared
-                                                    .urlForApplication(withBundleIdentifier:
-                                                                        "io.sideloadly.sideloadly")
-                                                if let url = url {
-                                                    NSWorkspace.shared
-                                                        .open([ipa], withApplicationAt: url, configuration: config)
-                                                } else {
-                                                    Log.shared.error("Could not find Sideloadly!")
-                                                }
+                if InstallVM.shared.inProgress {
+                    Log.shared.error(PlayCoverError.waitInstallation)
+                } else if DownloadVM.shared.inProgress {
+                    Log.shared.error(PlayCoverError.waitDownload)
+                } else {
+                    NSOpenPanel.selectIPA { result in
+                        if case .success(let url) = result {
+                            Task {
+                                Installer.install(ipaUrl: url, export: true, returnCompletion: { ipa in
+                                    Task { @MainActor in
+                                        if let ipa = ipa {
+                                            ipa.showInFinder()
+                                            let config = NSWorkspace.OpenConfiguration()
+                                            config.promptsUserIfNeeded = true
+                                            let url = NSWorkspace.shared.urlForApplication(
+                                                withBundleIdentifier: "io.sideloadly.sideloadly"
+                                            )
+                                            if let url = url {
+                                                NSWorkspace.shared.open(
+                                                    [ipa],
+                                                    withApplicationAt: url,
+                                                    configuration: config
+                                                )
                                             } else {
-                                                Log.shared.error("Could not find file!")
+                                                Log.shared.error("Could not find Sideloadly!")
                                             }
+                                        } else {
+                                            Log.shared.error("Could not find file!")
                                         }
-                                    })
-                                }
+                                    }
+                                })
                             }
                         }
                     }

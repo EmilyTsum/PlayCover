@@ -2,7 +2,7 @@
 
 This branch follows upstream PlayCover `develop` and bundles the public `EmilyTsum/PlayTools` `metal-capture` branch.
 
-Pinned PlayTools commit at this revision: `ae0c2d517bffab4e59dea4530e82411650a05bd2`.
+Pinned PlayTools commit at this revision: `9b435bc17836addbd0f40246d233bc7a6838ed42`.
 
 ## User-facing control
 
@@ -84,3 +84,12 @@ New per-app settings default Metal HUD to enabled. At launch PlayCover keeps the
 When the measured drawable cadence is effectively the requested capture rate, PTMC now accepts every present instead of applying a rate gate. This prevents small 60 Hz pacing jitter from becoming one/two-frame capture holes. Once the source is clearly faster than the target, PTMC switches to phase-preserving deadline sampling (for example 120→60 or 90→60).
 
 The normal raw-frame ring remains 3 slots. One additional preallocated emergency IOSurface slot may be used at most once per 250 ms to absorb isolated VideoToolbox latency spikes, but it is cooldown-limited so sustained overload still drops rather than growing a deep queue and disturbing game rendering.
+
+
+### Metal HUD capture policy
+
+The Metal Performance HUD remains enabled by default for diagnostics, but capture now defaults to excluding it. PTMC uses Apple's documented `CAMetalLayer.developerHUDProperties` `mode=disabled` runtime control only while a recording is active, intercepts later HUD-property changes so the exclusion policy stays stable, and restores the layer's previous HUD dictionary on Stop. Enabling **Include Metal HUD in recording** leaves the HUD untouched so it can be burned into the captured video.
+
+### Additional cleanup
+
+Repeated Start commands no longer reset a live PTMC session or discard capture-layer restoration state. The direct-drawable Metal command queue is created during asynchronous session preparation instead of on the first captured frame. PlayCover also avoids a duplicate PTMC config write at launch, guarantees `isStarting` is cleared on every early-return/error path, uses asynchronous sleeps for app-lifecycle monitoring, and removes the stale `await` around the callback-based IPA picker.
