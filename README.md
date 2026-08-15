@@ -33,7 +33,7 @@
 
 ## PTMC nightly fork
 
-This public fork tracks PlayCover `develop` and bundles the `EmilyTsum/PlayTools` `metal-capture` branch. It adds per-game **Metal Capture** settings for pre-compositor Metal recording: target FPS, HEVC bitrate, NV12 ring size, output directory, optional frame-pacing probes, and bundle-targeted Start / Stop / Status controls.
+This public fork tracks PlayCover `develop` and bundles the `EmilyTsum/PlayTools` `metal-capture` branch. It adds per-game **Capture** settings for pre-compositor Metal recording: target FPS, HEVC bitrate, NV12 ring size, output directory, optional frame-pacing probes, and bundle-targeted Start / Stop / Status controls.
 
 The packaged build is ad-hoc signed and is distributed separately from PlayCover's official Sparkle update channel. With current Homebrew releases, install the fully qualified cask so only this cask is trusted:
 

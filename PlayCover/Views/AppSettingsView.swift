@@ -228,6 +228,7 @@ private enum MetalCaptureCommand: String {
 struct MetalCaptureStatus {
     let phase: String
     let message: String
+    let timestamp: TimeInterval
     let outputPath: String?
     let drawableWidth: Int
     let drawableHeight: Int
@@ -241,6 +242,9 @@ struct MetalCaptureStatus {
     let displaySync: Int
     let framebufferOnly: Int
     let edr: Int
+    let presentHookCount: Int
+    let captureEnabled: Bool
+    let colorSpace: String
 
     static func read(bundleIdentifier: String) -> MetalCaptureStatus? {
         let url = MetalCapturePaths.statusFile(for: bundleIdentifier)
@@ -255,6 +259,7 @@ struct MetalCaptureStatus {
         return MetalCaptureStatus(
             phase: values["phase"] as? String ?? "unknown",
             message: values["message"] as? String ?? "",
+            timestamp: (values["timestamp"] as? NSNumber)?.doubleValue ?? 0,
             outputPath: values["outputPath"] as? String,
             drawableWidth: integer("drawableWidth"),
             drawableHeight: integer("drawableHeight"),
@@ -267,7 +272,10 @@ struct MetalCaptureStatus {
             unsupported: integer("unsupported"),
             displaySync: integer("displaySync"),
             framebufferOnly: integer("framebufferOnly"),
-            edr: integer("edr")
+            edr: integer("edr"),
+            presentHookCount: integer("presentHookCount"),
+            captureEnabled: (values["captureEnabled"] as? NSNumber)?.boolValue ?? false,
+            colorSpace: values["colorSpace"] as? String ?? "unknown"
         )
     }
 }
@@ -278,10 +286,10 @@ extension MetalCaptureStatus {
 }
 
 enum MetalCaptureControl {
-    static func post(_ command: String, bundleIdentifier: String) {
+    static func post(_ command: String, bundleIdentifier: String, settings: AppSettingsData? = nil) {
         guard let typedCommand = MetalCaptureCommand(rawValue: command) else { return }
-        if typedCommand == .start {
-            try? FileManager.default.removeItem(at: MetalCapturePaths.statusFile(for: bundleIdentifier))
+        if let settings {
+            MetalCapturePaths.writeRuntimeConfig(bundleIdentifier: bundleIdentifier, settings: settings)
         }
         let rawName = "io.playcover.ptmc.\(typedCommand.rawValue).\(bundleIdentifier)" as CFString
         let name = CFNotificationName(rawValue: rawName)
@@ -362,6 +370,12 @@ struct MetalCaptureView: View {
     let app: PlayApp
     let hasPlayTools: Bool?
     @State private var captureStatus: MetalCaptureStatus?
+    @State private var commandSentAt: Date?
+    @State private var commandLabel = ""
+    @State private var pollNow = Date()
+    @State private var gameRunning = false
+    @State private var partialFiles = 0
+    @State private var completedFiles = 0
 
     private var defaultOutputDescription: String {
         FileManager.default.homeDirectoryForCurrentUser
@@ -457,9 +471,12 @@ struct MetalCaptureView: View {
                            isOn: $settings.settings.metalCaptureDisableDisplaySync)
                         .help("Optional frame-pacing diagnostic. Leave off unless the game presents at only 60 fps.")
 
-                    Toggle("Force SDR presentation while capturing",
+                    Toggle("Force SDR presentation for capture",
                            isOn: $settings.settings.metalCaptureForceSDRDisplay)
-                        .help("Prevents EDR/HDR presentation while PTMC is reading the drawable.")
+                        .help(
+                            "While capture is enabled, PTMC forces EDR off and normalizes " +
+                            "the Metal layer colorspace to sRGB."
+                        )
 
                     HStack {
                         Text("Spoof UIScreen maximum FPS")
@@ -504,12 +521,24 @@ struct MetalCaptureView: View {
 
                     HStack {
                         Button("Start Recording") {
-                            MetalCaptureControl.post("start", bundleIdentifier: app.info.bundleIdentifier)
+                            commandSentAt = Date()
+                            commandLabel = "Start"
+                            MetalCaptureControl.post(
+                                "start",
+                                bundleIdentifier: app.info.bundleIdentifier,
+                                settings: settings.settings
+                            )
                         }
                         .buttonStyle(.borderedProminent)
 
                         Button("Stop Recording") {
-                            MetalCaptureControl.post("stop", bundleIdentifier: app.info.bundleIdentifier)
+                            commandSentAt = Date()
+                            commandLabel = "Stop"
+                            MetalCaptureControl.post(
+                                "stop",
+                                bundleIdentifier: app.info.bundleIdentifier,
+                                settings: settings.settings
+                            )
                             MetalCaptureControl.exportAfterFinalization(
                                 bundleIdentifier: app.info.bundleIdentifier,
                                 outputDirectory: settings.settings.metalCaptureOutputDirectory
@@ -517,8 +546,12 @@ struct MetalCaptureView: View {
                         }
 
                         Button("Refresh Status") {
-                            MetalCaptureControl.post("status", bundleIdentifier: app.info.bundleIdentifier)
-                            captureStatus = MetalCaptureStatus.read(bundleIdentifier: app.info.bundleIdentifier)
+                            MetalCaptureControl.post(
+                                "status",
+                                bundleIdentifier: app.info.bundleIdentifier,
+                                settings: settings.settings
+                            )
+                            refreshRuntimeState()
                         }
                         Spacer()
                     }
@@ -537,8 +570,7 @@ struct MetalCaptureView: View {
                     }
 
                     Text("Start/Stop/Status target only this game's bundle identifier. " +
-                         "Capture hooks stay dormant in standby, so Start can also work after enabling capture " +
-                         "while a game from this PTMC build is already running.")
+                         "The runtime panel above refreshes automatically while this settings window is open.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -547,46 +579,176 @@ struct MetalCaptureView: View {
             }
         }
         .task(id: app.info.bundleIdentifier) {
+            MetalCapturePaths.writeRuntimeConfig(
+                bundleIdentifier: app.info.bundleIdentifier,
+                settings: settings.settings
+            )
             MetalCaptureControl.exportCompletedCaptures(
                 bundleIdentifier: app.info.bundleIdentifier,
                 outputDirectory: settings.settings.metalCaptureOutputDirectory
             )
+            var pollCount = 0
             while !Task.isCancelled {
-                captureStatus = MetalCaptureStatus.read(bundleIdentifier: app.info.bundleIdentifier)
-                try? await Task.sleep(nanoseconds: 750_000_000)
+                pollNow = Date()
+                refreshRuntimeState()
+                if gameRunning && settings.settings.metalCaptureEnabled && pollCount.isMultiple(of: 2) {
+                    MetalCaptureControl.post(
+                        "status",
+                        bundleIdentifier: app.info.bundleIdentifier,
+                        settings: settings.settings
+                    )
+                }
+                pollCount += 1
+                try? await Task.sleep(nanoseconds: 500_000_000)
             }
+        }
+        .onChange(of: settings.settings.metalCaptureEnabled) { enabled in
+            syncRuntimeConfiguration(command: enabled ? "status" : "stop")
+        }
+        .onChange(of: settings.settings.metalCaptureForceSDRDisplay) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
+        .onChange(of: settings.settings.metalCaptureDisableDisplaySync) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
+        .onChange(of: settings.settings.metalCaptureSpoofMaxFPS) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
+        .onChange(of: settings.settings.metalCaptureFPS) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
+        .onChange(of: settings.settings.metalCaptureBitrateMbps) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
+        .onChange(of: settings.settings.metalCaptureBuffers) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
+        .onChange(of: settings.settings.metalCaptureLogInterval) { _ in
+            syncRuntimeConfiguration(command: "status")
         }
     }
 
     @ViewBuilder
     private var captureStatusView: some View {
-        if let status = captureStatus {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Image(systemName: status.phase == "error" ? "exclamationmark.triangle.fill" : "waveform.path.ecg")
-                    Text("Runtime: \(status.phase)")
-                        .font(.caption.bold())
-                    Spacer()
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                if isRuntimeBusy {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: captureStatus?.phase == "error"
+                          ? "exclamationmark.triangle.fill"
+                          : "waveform.path.ecg")
+                }
+                Text(runtimeTitle)
+                    .font(.caption.bold())
+                Spacer()
+                Text(gameRunning ? "game running" : "game not running")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(runtimeMessage)
+                .font(.caption)
+                .foregroundStyle(captureStatus?.phase == "error" ? .red : .secondary)
+
+            if let status = captureStatus {
+                Text(
+                    "hooks \(status.presentHookCount) • presented \(status.presented) • " +
+                    "captured \(status.captured) • encoded \(status.encoded) • drops \(status.totalDrops)"
+                )
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text("SDR gate \(status.captureEnabled ? "enabled" : "disabled") • " +
+                     "EDR \(status.edr == 1 ? "on" : "off") • colorspace \(status.colorSpace)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
                     if status.drawableWidth > 0 && status.drawableHeight > 0 {
-                        Text("\(status.drawableWidth)×\(status.drawableHeight)")
-                            .font(.caption.monospacedDigit())
+                        Text("drawable \(status.drawableWidth)×\(status.drawableHeight)")
+                    }
+                    Text("last PTMC update \(statusAgeText(status)) ago")
+                    if status.outputPath != nil {
+                        Text("output path armed")
                     }
                 }
-                Text(status.message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if status.requestedMetricsVisible {
-                    Text("presented \(status.presented) • captured \(status.captured) • encoded \(status.encoded) • " +
-                         "drops \(status.totalDrops) • EDR \(status.edr == 1 ? "on" : "off")")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
             }
-        } else {
-            Text("Runtime status will appear after the PTMC-enabled game launches.")
-                .font(.caption)
+
+            Text("staging: \(partialFiles) recording • \(completedFiles) completed")
+                .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var isRuntimeBusy: Bool {
+        guard let phase = captureStatus?.phase else { return commandSentAt != nil && gameRunning }
+        return ["requested", "armed", "recording", "active", "stopping"].contains(phase)
+    }
+
+    private var runtimeTitle: String {
+        guard gameRunning else { return "Runtime: idle" }
+        if let status = captureStatus {
+            if status.timestamp > 0 && pollNow.timeIntervalSince1970 - status.timestamp > 3 {
+                return "Runtime: stale heartbeat"
+            }
+            return "Runtime: \(status.phase)"
+        }
+        return "Runtime: waiting for PTMC heartbeat"
+    }
+
+    private var runtimeMessage: String {
+        if let sent = commandSentAt,
+           captureStatus == nil || (captureStatus?.timestamp ?? 0) < sent.timeIntervalSince1970 {
+            let elapsed = max(0, pollNow.timeIntervalSince(sent))
+            return "\(commandLabel) command sent • waiting " +
+                "\(String(format: "%.1f", elapsed)) s for PTMC acknowledgement"
+        }
+        if let status = captureStatus {
+            return status.message
+        }
+        if gameRunning {
+            return "The game process is running, but PTMC has not published a status heartbeat yet."
+        }
+        return "Launch the game to establish a PTMC runtime heartbeat."
+    }
+
+    private func statusAgeText(_ status: MetalCaptureStatus) -> String {
+        guard status.timestamp > 0 else { return "unknown" }
+        let age = max(0, pollNow.timeIntervalSince1970 - status.timestamp)
+        return age < 10 ? String(format: "%.1f s", age) : "\(Int(age)) s"
+    }
+
+    private func syncRuntimeConfiguration(command: String) {
+        MetalCapturePaths.writeRuntimeConfig(
+            bundleIdentifier: app.info.bundleIdentifier,
+            settings: settings.settings
+        )
+        guard gameRunning else { return }
+        MetalCaptureControl.post(
+            command,
+            bundleIdentifier: app.info.bundleIdentifier,
+            settings: settings.settings
+        )
+    }
+
+    private func refreshRuntimeState() {
+        captureStatus = MetalCaptureStatus.read(bundleIdentifier: app.info.bundleIdentifier)
+        gameRunning = !NSRunningApplication.runningApplications(
+            withBundleIdentifier: app.info.bundleIdentifier
+        ).isEmpty
+
+        let directory = MetalCapturePaths.captureDirectory(for: app.info.bundleIdentifier)
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        partialFiles = files.filter { $0.lastPathComponent.hasSuffix(".partial.mov") }.count
+        completedFiles = files.filter {
+            $0.pathExtension.lowercased() == "mov" && !$0.lastPathComponent.hasSuffix(".partial.mov")
+        }.count
     }
 
     private func chooseOutputDirectory() {

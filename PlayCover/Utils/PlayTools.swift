@@ -46,28 +46,48 @@ class PlayTools {
     static func installOnSystem() {
         Task(priority: .background) {
             do {
-                Log.shared.log("Installing PlayTools")
-
-                // Check if Frameworks folder exists, if not, create it
-                if !FileManager.default.fileExists(atPath: frameworksURL.path) {
-                    try FileManager.default.createDirectory(
-                        atPath: frameworksURL.path,
-                        withIntermediateDirectories: true,
-                        attributes: [:])
-                }
-
-                // Check if a version of PlayTools is already installed, if so remove it
-                FileManager.default.delete(at: URL(fileURLWithPath: playToolsFramework.path))
-
-                // Install version of PlayTools bundled with PlayCover
-                Log.shared.log("Copying PlayTools to Frameworks")
-                if FileManager.default.fileExists(atPath: playToolsFramework.path) {
-                    try FileManager.default.removeItem(at: playToolsFramework)
-                }
-                try FileManager.default.copyItem(at: bundledPlayToolsFramework, to: playToolsFramework)
+                try ensureInstalledOnSystem()
             } catch {
                 Log.shared.error(error)
             }
+        }
+    }
+
+    /// Ensure the framework referenced by injected games is exactly the PTMC framework bundled
+    /// with this PlayCover build. This is also called synchronously immediately before launch so
+    /// a background first-launch copy can never race the game process.
+    static func ensureInstalledOnSystem() throws {
+        let fileManager = FileManager.default
+        let bundledBinary = bundledPlayToolsFramework.appendingPathComponent("PlayTools")
+        let installedBinary = playToolsFramework.appendingPathComponent("PlayTools")
+        let bundledPlugin = bundledPlayToolsFramework
+            .appendingPathComponent("PlugIns/AKInterface.bundle/Contents/MacOS/AKInterface")
+        let installedPlugin = playToolsFramework
+            .appendingPathComponent("PlugIns/AKInterface.bundle/Contents/MacOS/AKInterface")
+
+        if fileManager.fileExists(atPath: installedBinary.path),
+           fileManager.contentsEqual(atPath: installedBinary.path, andPath: bundledBinary.path),
+           fileManager.fileExists(atPath: installedPlugin.path),
+           fileManager.contentsEqual(atPath: installedPlugin.path, andPath: bundledPlugin.path) {
+            return
+        }
+
+        Log.shared.log("Installing bundled PTMC PlayTools")
+        try fileManager.createDirectory(at: frameworksURL, withIntermediateDirectories: true)
+
+        let temporaryFramework = frameworksURL
+            .appendingPathComponent(".PlayTools-\(UUID().uuidString)")
+            .appendingPathExtension("framework")
+        defer { try? fileManager.removeItem(at: temporaryFramework) }
+
+        try fileManager.copyItem(at: bundledPlayToolsFramework, to: temporaryFramework)
+        if fileManager.fileExists(atPath: playToolsFramework.path) {
+            try fileManager.removeItem(at: playToolsFramework)
+        }
+        try fileManager.moveItem(at: temporaryFramework, to: playToolsFramework)
+
+        guard fileManager.contentsEqual(atPath: installedBinary.path, andPath: bundledBinary.path) else {
+            throw "Installed PlayTools does not match bundled PTMC PlayTools"
         }
     }
 

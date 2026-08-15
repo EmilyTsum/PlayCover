@@ -21,6 +21,40 @@ enum MetalCapturePaths {
             .appendingPathExtension("plist")
     }
 
+    static func configFile(for bundleIdentifier: String) -> URL {
+        PlayTools.playCoverContainer
+            .appendingPathComponent("PTMC Config")
+            .appendingPathComponent(bundleIdentifier)
+            .appendingPathExtension("plist")
+    }
+
+    static func writeRuntimeConfig(bundleIdentifier: String, settings: AppSettingsData) {
+        prepare(for: bundleIdentifier)
+        let values: [String: Any] = [
+            "enabled": settings.metalCaptureEnabled,
+            "autostart": settings.metalCaptureAutostart,
+            "fps": min(max(settings.metalCaptureFPS, 1), 240),
+            "bitrate": min(max(settings.metalCaptureBitrateMbps, 1), 1000) * 1_000_000,
+            "buffers": min(max(settings.metalCaptureBuffers, 3), 16),
+            "logInterval": min(max(settings.metalCaptureLogInterval, 0.25), 60.0),
+            "disableDisplaySync": settings.metalCaptureDisableDisplaySync,
+            "forceSDRDisplay": settings.metalCaptureForceSDRDisplay,
+            "spoofMaxFPS": min(max(settings.metalCaptureSpoofMaxFPS, 0), 240),
+            "outputDirectory": captureDirectory(for: bundleIdentifier).path,
+            "statusFile": statusFile(for: bundleIdentifier).path
+        ]
+        do {
+            let data = try PropertyListSerialization.data(
+                fromPropertyList: values,
+                format: .binary,
+                options: 0
+            )
+            try data.write(to: configFile(for: bundleIdentifier), options: .atomic)
+        } catch {
+            Log.shared.log("PTMC runtime config write failed: \(error.localizedDescription)", isError: true)
+        }
+    }
+
     static func exportDirectory(from rawValue: String) -> URL {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
@@ -34,7 +68,9 @@ enum MetalCapturePaths {
         let fileManager = FileManager.default
         try? fileManager.createDirectory(at: captureDirectory(for: bundleIdentifier), withIntermediateDirectories: true)
         try? fileManager.createDirectory(at: statusFile(for: bundleIdentifier).deletingLastPathComponent(),
-                                withIntermediateDirectories: true)
+                                         withIntermediateDirectories: true)
+        try? fileManager.createDirectory(at: configFile(for: bundleIdentifier).deletingLastPathComponent(),
+                                         withIntermediateDirectories: true)
     }
 }
 
@@ -184,6 +220,20 @@ extension PlayApp {
     }
 
     func runAppExec() {
+        do {
+            try PlayTools.ensureInstalledOnSystem()
+        } catch {
+            Log.shared.log(
+                "Unable to prepare PTMC PlayTools before launch: \(error.localizedDescription)",
+                isError: true
+            )
+        }
+
+        MetalCapturePaths.writeRuntimeConfig(
+            bundleIdentifier: info.bundleIdentifier,
+            settings: settings.settings
+        )
+
         let config = NSWorkspace.OpenConfiguration()
 
         // Prevent propagating debugging-related variables to child process
@@ -253,6 +303,7 @@ extension PlayApp {
 
     private func metalCaptureLaunchEnvironment() -> [String: String] {
         let capture = settings.settings
+        MetalCapturePaths.writeRuntimeConfig(bundleIdentifier: info.bundleIdentifier, settings: capture)
         let fps = min(max(capture.metalCaptureFPS, 1), 240)
         let bitrateMbps = min(max(capture.metalCaptureBitrateMbps, 1), 1000)
         let buffers = min(max(capture.metalCaptureBuffers, 3), 16)
@@ -264,9 +315,7 @@ extension PlayApp {
         let statusFile = MetalCapturePaths.statusFile(for: info.bundleIdentifier)
 
         return [
-            // Standby keeps the hooks/notification receiver available with negligible per-frame
-            // overhead, so enabling capture while a game is already running can work immediately.
-            "PTMC_STANDBY": "1",
+            // PTMC hooks initialize dormant even when capture is disabled.
             "PTMC_ENABLE": capture.metalCaptureEnabled ? "1" : "0",
             "PTMC_AUTOSTART": capture.metalCaptureEnabled && capture.metalCaptureAutostart ? "1" : "0",
             "PTMC_FPS": String(fps),
