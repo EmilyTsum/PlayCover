@@ -167,8 +167,8 @@ final class PTMCGlobalHotKeyManager {
     private func registerHotKeys() {
         guard toggleHotKey == nil, stopHotKey == nil else { return }
         let baseModifiers = UInt32(cmdKey | optionKey)
-        var toggleID = EventHotKeyID(signature: ptmcHotKeySignature, id: ptmcToggleHotKeyID)
-        var stopID = EventHotKeyID(signature: ptmcHotKeySignature, id: ptmcStopHotKeyID)
+        let toggleID = EventHotKeyID(signature: ptmcHotKeySignature, id: ptmcToggleHotKeyID)
+        let stopID = EventHotKeyID(signature: ptmcHotKeySignature, id: ptmcStopHotKeyID)
 
         let toggleStatus = RegisterEventHotKey(
             UInt32(kVK_ANSI_R),
