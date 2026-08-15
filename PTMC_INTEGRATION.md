@@ -6,7 +6,7 @@ This file is the first document to read for the `ptmc-nightly` branch. It record
 
 - PlayCover branch: `EmilyTsum/PlayCover:ptmc-nightly`
 - PlayTools branch: `EmilyTsum/PlayTools:metal-capture`
-- Pinned PlayTools commit: `2f737c8da8578452ed2d0586d104f7d3b98edf4b`
+- Pinned PlayTools commit: `ee13209dc51ca1722fa449927e6fed82daf882b3`
 - Legacy overlay repository is retained only for reproducibility; it is not the active implementation.
 
 `Cartfile.resolved` is authoritative for the PlayTools revision bundled into PlayCover. CI writes both PlayCover and PlayTools commit IDs into every DMG artifact.
