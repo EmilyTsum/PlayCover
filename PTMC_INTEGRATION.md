@@ -2,7 +2,7 @@
 
 This branch follows upstream PlayCover `develop` and bundles the public `EmilyTsum/PlayTools` `metal-capture` branch.
 
-Pinned PlayTools commit at this revision: `420f803dfc435f30e1a86e2b6fe138441d8ae6ed`.
+Pinned PlayTools commit at this revision: `ae0c2d517bffab4e59dea4530e82411650a05bd2`.
 
 ## User-facing control
 
@@ -77,3 +77,10 @@ VideoToolbox submission runs on a dedicated user-initiated serial queue. Its cal
 ### Metal HUD diagnostics default
 
 New per-app settings default Metal HUD to enabled. At launch PlayCover keeps the macOS Metal HUD menu bar available and requests Apple's detailed value-range view (`MTL_HUD_SHOW_VALUE_RANGE=1`, with the current range key also enabled). PTMC does not force encoder timing or per-frame HUD logging because Apple documents additional HUD CPU cost for encoder timing; those heavier diagnostics remain opt-in from the Metal HUD menu/configuration panel. Existing saved per-app HUD choices remain unchanged.
+
+
+### Near-target jitter handling
+
+When the measured drawable cadence is effectively the requested capture rate, PTMC now accepts every present instead of applying a rate gate. This prevents small 60 Hz pacing jitter from becoming one/two-frame capture holes. Once the source is clearly faster than the target, PTMC switches to phase-preserving deadline sampling (for example 120→60 or 90→60).
+
+The normal raw-frame ring remains 3 slots. One additional preallocated emergency IOSurface slot may be used at most once per 250 ms to absorb isolated VideoToolbox latency spikes, but it is cooldown-limited so sustained overload still drops rather than growing a deep queue and disturbing game rendering.

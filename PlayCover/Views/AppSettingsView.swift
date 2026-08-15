@@ -253,6 +253,7 @@ struct MetalCaptureStatus {
     let inFlight: Int
     let pendingWrites: Int
     let bufferCount: Int
+    let burstSlotUses: Int
     let codec: String
     let firstVideoHostTimeNs: UInt64
     let displaySync: Int
@@ -306,6 +307,7 @@ struct MetalCaptureStatus {
             inFlight: integer("inFlight"),
             pendingWrites: integer("pendingWrites"),
             bufferCount: integer("bufferCount"),
+            burstSlotUses: integer("burstSlotUses"),
             codec: values["codec"] as? String ?? "hevc",
             firstVideoHostTimeNs: (values["firstVideoHostTimeNs"] as? NSNumber)?.uint64Value ?? 0,
             displaySync: integer("displaySync"),
@@ -880,8 +882,9 @@ struct MetalCaptureView: View {
                         }
                     }
                     Text(
-                        "3 is recommended for low-latency capture. More slots allow a deeper raw-frame queue and can " +
-                        "increase GPU/unified-memory pressure at 4K even though encoding itself is asynchronous."
+                        "3 is recommended for low-latency capture. PTMC also keeps one cooldown-limited emergency " +
+                        "slot for isolated encoder latency spikes; increasing the regular ring can raise 4K " +
+                        "GPU/unified-memory pressure."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1142,8 +1145,9 @@ struct MetalCaptureView: View {
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
                 Text(
-                    "pipeline: raw in-flight \(status.inFlight)/\(status.bufferCount) • compressed pending " +
-                    "\(status.pendingWrites) • present skips \(status.skippedPresents)"
+                    "pipeline: raw in-flight \(status.inFlight)/\(status.bufferCount) regular (+1 burst) • " +
+                    "compressed pending \(status.pendingWrites) • burst recoveries \(status.burstSlotUses) • " +
+                    "present skips \(status.skippedPresents)"
                 )
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
