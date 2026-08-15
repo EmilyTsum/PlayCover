@@ -315,8 +315,8 @@ extension PlayApp {
         let captureDirectory = MetalCapturePaths.captureDirectory(for: info.bundleIdentifier)
         let statusFile = MetalCapturePaths.statusFile(for: info.bundleIdentifier)
 
-        return [
-            // PTMC hooks initialize dormant even when capture is disabled.
+        var environment = [
+            // PTMC runtime stays dormant until Start Recording.
             "PTMC_ENABLE": capture.metalCaptureEnabled ? "1" : "0",
             "PTMC_AUTOSTART": capture.metalCaptureEnabled && capture.metalCaptureAutostart ? "1" : "0",
             "PTMC_CODEC": capture.metalCaptureCodec,
@@ -332,6 +332,14 @@ extension PlayApp {
             "PTMC_OUTPUT_DIR": captureDirectory.path,
             "PTMC_STATUS_FILE": statusFile.path
         ]
+        if capture.metalHUD {
+            // Apple documents that an enabled Metal HUD adds its own "Metal HUD" menu to the
+            // macOS menu bar unless MTL_HUD_DISABLE_MENU_BAR is set. Be explicit because wrapped
+            // iOS apps don't inherit a normal shell/Xcode environment reliably.
+            environment["MTL_HUD_ENABLED"] = "1"
+            environment["MTL_HUD_DISABLE_MENU_BAR"] = "0"
+        }
+        return environment
     }
 }
 

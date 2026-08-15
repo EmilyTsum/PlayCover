@@ -2,7 +2,7 @@
 
 This branch follows upstream PlayCover `develop` and bundles the public `EmilyTsum/PlayTools` `metal-capture` branch.
 
-Pinned PlayTools commit at this revision: `c2207bf4e3e52624b96ef990c728f95a9b896eac`.
+Pinned PlayTools commit at this revision: `64c956c10a2b76185682bed996c9fbb7f37aab53`.
 
 ## User-facing control
 
@@ -37,3 +37,9 @@ PTMC now intercepts both `MTLCommandBuffer presentDrawable:*` and direct `CAMeta
 The capture FPS setting is an actual sampling ceiling: a 120 Hz game captured at 60 fps skips conversion/encode work for intermediate presents instead of merely tagging the encoder as 60 fps. Video codecs are HEVC plus hardware-required Apple ProRes 422 LT / 422 / 422 HQ.
 
 Game audio is captured separately by PlayCover with ScreenCaptureKit's application-level audio filter at 48 kHz stereo AAC, then muxed into the finalized PTMC MOV. No ScreenCaptureKit video frames are used by PTMC.
+
+### Performance behavior
+
+Frame-path hooks are installed only when Start Recording is requested. Direct `CAMetalDrawable.present*` is preferred on real-device Unity; command-buffer interception is only a fallback. On Stop, PTMC restores the original Metal method implementations, so the idle game returns to native dispatch with no per-frame PTMC wrapper. The UI reads the runtime heartbeat without continuously posting status notifications or rewriting configuration.
+
+The Metal Performance HUD launch environment explicitly enables the HUD menu bar (`MTL_HUD_DISABLE_MENU_BAR=0`) whenever the per-app Metal HUD toggle is enabled.

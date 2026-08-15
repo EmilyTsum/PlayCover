@@ -410,7 +410,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
                         : nil
                     if !completed {
                         Log.shared.log(
-                            "PTMC audio writer failed: \(writer.error?.localizedDescription ?? \"unknown error\")",
+                            "PTMC audio writer failed: \(writer.error?.localizedDescription ?? "unknown error")",
                             isError: true
                         )
                         try? FileManager.default.removeItem(at: url)
@@ -464,8 +464,6 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         outputURL = nil
         firstHostTimeNs = 0
         appendedSamples = 0
-    }
-
     }
 }
 
@@ -650,7 +648,7 @@ enum MetalCaptureControl {
         }
         guard exported else {
             Log.shared.log(
-                "PTMC mux export failed: \(exporter.error?.localizedDescription ?? \"unknown error\")",
+                "PTMC mux export failed: \(exporter.error?.localizedDescription ?? "unknown error")",
                 isError: true
             )
             return false
@@ -918,18 +916,11 @@ struct MetalCaptureView: View {
                 bundleIdentifier: app.info.bundleIdentifier,
                 outputDirectory: settings.settings.metalCaptureOutputDirectory
             )
-            var pollCount = 0
             while !Task.isCancelled {
                 pollNow = Date()
                 refreshRuntimeState()
-                if gameRunning && settings.settings.metalCaptureEnabled && pollCount.isMultiple(of: 2) {
-                    MetalCaptureControl.post(
-                        "status",
-                        bundleIdentifier: app.info.bundleIdentifier,
-                        settings: settings.settings
-                    )
-                }
-                pollCount += 1
+                // PlayTools publishes a one-second heartbeat while recording. Reading that file is
+                // enough; don't send a Darwin notification and rewrite config every poll.
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
@@ -1026,7 +1017,7 @@ struct MetalCaptureView: View {
     private var runtimeTitle: String {
         guard gameRunning else { return "Runtime: idle" }
         if let status = captureStatus {
-            if status.timestamp > 0 && pollNow.timeIntervalSince1970 - status.timestamp > 3 {
+            if status.timestamp > 0 && pollNow.timeIntervalSince1970 - status.timestamp > 7 {
                 return "Runtime: stale heartbeat"
             }
             return "Runtime: \(status.phase)"
