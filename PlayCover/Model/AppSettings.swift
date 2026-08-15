@@ -80,6 +80,20 @@ struct AppSettingsData: Codable {
     // swiftlint:disable:next function_body_length
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        func decodeCaptureValue<T: Decodable>(
+            _ type: T.Type,
+            forKey key: CodingKeys,
+            default defaultValue: T
+        ) -> T {
+            do {
+                return try container.decodeIfPresent(type, forKey: key) ?? defaultValue
+            } catch {
+                // PTMC iterated quickly before its first stable releases. Treat a stale/wrongly typed
+                // capture key as absent instead of rejecting the app's entire settings plist.
+                return defaultValue
+            }
+        }
+
         bundleIdentifier = try container.decodeIfPresent(String.self, forKey: .bundleIdentifier) ?? ""
         keymapping = try container.decodeIfPresent(Bool.self, forKey: .keymapping) ?? true
         sensitivity = try container.decodeIfPresent(Float.self, forKey: .sensitivity) ?? 50
@@ -117,36 +131,46 @@ struct AppSettingsData: Codable {
         blockSleepSpamming = try container.decodeIfPresent(Bool.self, forKey: .blockSleepSpamming) ?? false
         ignoreUnityKeyboardInitializationError = try container.decodeIfPresent(
             Bool.self, forKey: .ignoreUnityKeyboardInitializationError) ?? false
-        metalCaptureEnabled = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureEnabled) ?? false
-        metalCaptureAutostart = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureAutostart) ?? false
-        metalCaptureCodec = try container.decodeIfPresent(String.self, forKey: .metalCaptureCodec) ?? "hevc"
-        metalCaptureAudioEnabled = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureAudioEnabled) ?? true
-        metalCaptureGlobalHotkeysEnabled = try container.decodeIfPresent(
-            Bool.self, forKey: .metalCaptureGlobalHotkeysEnabled) ?? true
-        metalCaptureFeedbackSounds = try container.decodeIfPresent(
-            Bool.self, forKey: .metalCaptureFeedbackSounds) ?? true
-        metalCaptureIncludeHUD = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureIncludeHUD) ?? false
-        metalCaptureResolutionMode = try container.decodeIfPresent(
-            String.self, forKey: .metalCaptureResolutionMode) ?? "source"
-        metalCaptureCustomWidth = try container.decodeIfPresent(
-            Int.self, forKey: .metalCaptureCustomWidth) ?? 1920
-        metalCaptureCustomHeight = try container.decodeIfPresent(
-            Int.self, forKey: .metalCaptureCustomHeight) ?? 1080
-        metalCaptureSuppressDisplayOutput = try container.decodeIfPresent(
-            Bool.self, forKey: .metalCaptureSuppressDisplayOutput) ?? false
-        metalCaptureSkipDisplayPresent = try container.decodeIfPresent(
-            Bool.self, forKey: .metalCaptureSkipDisplayPresent) ?? false
-        metalCaptureFPS = try container.decodeIfPresent(Int.self, forKey: .metalCaptureFPS) ?? 120
-        metalCaptureBitrateMbps = try container.decodeIfPresent(Int.self, forKey: .metalCaptureBitrateMbps) ?? 120
-        metalCaptureBuffers = try container.decodeIfPresent(Int.self, forKey: .metalCaptureBuffers) ?? 3
-        metalCaptureLogInterval = try container.decodeIfPresent(Double.self, forKey: .metalCaptureLogInterval) ?? 1.0
-        metalCaptureDisableDisplaySync = try container.decodeIfPresent(
-            Bool.self, forKey: .metalCaptureDisableDisplaySync) ?? false
-        metalCaptureForceSDRDisplay = try container.decodeIfPresent(
-            Bool.self, forKey: .metalCaptureForceSDRDisplay) ?? true
-        metalCaptureSpoofMaxFPS = try container.decodeIfPresent(Int.self, forKey: .metalCaptureSpoofMaxFPS) ?? 0
-        metalCaptureOutputDirectory = try container.decodeIfPresent(
-            String.self, forKey: .metalCaptureOutputDirectory) ?? ""
+        metalCaptureEnabled = decodeCaptureValue(Bool.self, forKey: .metalCaptureEnabled, default: false)
+        metalCaptureAutostart = decodeCaptureValue(Bool.self, forKey: .metalCaptureAutostart, default: false)
+        metalCaptureCodec = decodeCaptureValue(String.self, forKey: .metalCaptureCodec, default: "hevc")
+        metalCaptureAudioEnabled = decodeCaptureValue(Bool.self, forKey: .metalCaptureAudioEnabled, default: true)
+        metalCaptureGlobalHotkeysEnabled = decodeCaptureValue(
+            Bool.self, forKey: .metalCaptureGlobalHotkeysEnabled, default: true
+        )
+        metalCaptureFeedbackSounds = decodeCaptureValue(
+            Bool.self, forKey: .metalCaptureFeedbackSounds, default: true
+        )
+        metalCaptureIncludeHUD = decodeCaptureValue(Bool.self, forKey: .metalCaptureIncludeHUD, default: false)
+        metalCaptureResolutionMode = decodeCaptureValue(
+            String.self, forKey: .metalCaptureResolutionMode, default: "source"
+        )
+        metalCaptureCustomWidth = decodeCaptureValue(
+            Int.self, forKey: .metalCaptureCustomWidth, default: 1920
+        )
+        metalCaptureCustomHeight = decodeCaptureValue(
+            Int.self, forKey: .metalCaptureCustomHeight, default: 1080
+        )
+        metalCaptureSuppressDisplayOutput = decodeCaptureValue(
+            Bool.self, forKey: .metalCaptureSuppressDisplayOutput, default: false
+        )
+        metalCaptureSkipDisplayPresent = decodeCaptureValue(
+            Bool.self, forKey: .metalCaptureSkipDisplayPresent, default: false
+        )
+        metalCaptureFPS = decodeCaptureValue(Int.self, forKey: .metalCaptureFPS, default: 120)
+        metalCaptureBitrateMbps = decodeCaptureValue(Int.self, forKey: .metalCaptureBitrateMbps, default: 120)
+        metalCaptureBuffers = decodeCaptureValue(Int.self, forKey: .metalCaptureBuffers, default: 3)
+        metalCaptureLogInterval = decodeCaptureValue(Double.self, forKey: .metalCaptureLogInterval, default: 1.0)
+        metalCaptureDisableDisplaySync = decodeCaptureValue(
+            Bool.self, forKey: .metalCaptureDisableDisplaySync, default: false
+        )
+        metalCaptureForceSDRDisplay = decodeCaptureValue(
+            Bool.self, forKey: .metalCaptureForceSDRDisplay, default: true
+        )
+        metalCaptureSpoofMaxFPS = decodeCaptureValue(Int.self, forKey: .metalCaptureSpoofMaxFPS, default: 0)
+        metalCaptureOutputDirectory = decodeCaptureValue(
+            String.self, forKey: .metalCaptureOutputDirectory, default: ""
+        )
     }
 }
 
@@ -170,9 +194,10 @@ class AppSettings: ObservableObject {
     let settingsUrl: URL
     var openWithLLDB: Bool = false
     var openLLDBWithTerminal: Bool = true
+    private var suppressPersistence = false
     @Published var settings: AppSettingsData {
         didSet {
-            encode()
+            if !suppressPersistence { encode() }
         }
     }
 
@@ -180,12 +205,17 @@ class AppSettings: ObservableObject {
         self.info = info
         settingsUrl = AppSettings.appSettingsDir.appendingPathComponent(info.bundleIdentifier)
                                                 .appendingPathExtension("plist")
-        settings = AppSettingsData()
+        var defaults = AppSettingsData()
+        defaults.bundleIdentifier = info.bundleIdentifier
+        settings = defaults
         if !decode() {
+            preserveUnreadableSettingsIfPresent()
             encode()
         }
 
-        settings.bundleIdentifier = info.bundleIdentifier
+        if settings.bundleIdentifier != info.bundleIdentifier {
+            settings.bundleIdentifier = info.bundleIdentifier
+        }
     }
 
     public func sync() {
@@ -193,17 +223,28 @@ class AppSettings: ObservableObject {
     }
 
     public func reset() {
-        settings = AppSettingsData()
+        var defaults = AppSettingsData()
+        defaults.bundleIdentifier = info.bundleIdentifier
+        settings = defaults
     }
 
     @discardableResult
     public func decode() -> Bool {
         do {
             let data = try Data(contentsOf: settingsUrl)
-            settings = try PropertyListDecoder().decode(AppSettingsData.self, from: data)
+            let decoded = try PropertyListDecoder().decode(AppSettingsData.self, from: data)
+            suppressPersistence = true
+            settings = decoded
+            suppressPersistence = false
             return true
         } catch {
-            print(error)
+            suppressPersistence = false
+            if FileManager.default.fileExists(atPath: settingsUrl.path) {
+                Log.shared.log(
+                    "App settings decode failed for \(info.bundleIdentifier): \(error.localizedDescription)",
+                    isError: true
+                )
+            }
             return false
         }
     }
@@ -215,11 +256,31 @@ class AppSettings: ObservableObject {
 
         do {
             let data = try encoder.encode(settings)
-            try data.write(to: settingsUrl)
+            try data.write(to: settingsUrl, options: .atomic)
             return true
         } catch {
-            print(error)
+            Log.shared.log(
+                "App settings write failed for \(info.bundleIdentifier): \(error.localizedDescription)",
+                isError: true
+            )
             return false
+        }
+    }
+
+    private func preserveUnreadableSettingsIfPresent() {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: settingsUrl.path) else { return }
+        let backupURL = settingsUrl.deletingPathExtension().appendingPathExtension("invalid.plist")
+        do {
+            try? fileManager.removeItem(at: backupURL)
+            try fileManager.copyItem(at: settingsUrl, to: backupURL)
+            Log.shared.log("Preserved unreadable app settings at \(backupURL.path)", isError: true)
+        } catch {
+            Log.shared.log(
+                "Failed to preserve unreadable app settings for \(info.bundleIdentifier): " +
+                    error.localizedDescription,
+                isError: true
+            )
         }
     }
 }

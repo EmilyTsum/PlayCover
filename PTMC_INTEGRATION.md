@@ -123,6 +123,10 @@ These were reviewed and intentionally incorporated rather than blindly merging a
 
 Per-game Capture settings are written to a PTMC runtime plist and launch environment. UI and global-hotkey Start/Stop/status use the same bundle-targeted Darwin notifications (`io.playcover.ptmc.<command>.<bundle-id>`). The game writes partial/final MOVs under PlayCover's container; PlayCover exports completed files to `~/Movies` or the chosen directory. Global shortcut and feedback-sound preferences are host-only settings and are not injected into the game process.
 
+Per-game PlayCover settings are persisted separately under the PlayCover container. PTMC capture keys must remain backward-compatible with older fork plists: missing or stale/wrongly-typed PTMC keys decode to current defaults instead of rejecting the whole settings object. Settings writes are atomic, loading does not rewrite the plist as a side effect, Reset preserves the app bundle identifier, and an unreadable plist is copied to a sibling `.invalid.plist` before defaults replace it. This hardening was added after a real-device case where Reset made previously non-persistent PTMC controls work again; the original pre-reset plist was no longer available, so no specific corrupt key is considered proven.
+
+`AppsVM.fetchApps()` also preserves an existing `PlayApp`/`AppSettings` object when the installed bundle's identity and Info.plist signature are unchanged. This avoids a second stale in-memory settings object after library refresh or game launch: the settings sheet, global-hotkey manager, and runtime controls continue to refer to the same per-game settings instance. A changed/reinstalled bundle still gets a fresh `PlayApp`.
+
 `scripts/ptmcctl.swift` can inspect and control the same runtime on macOS:
 
 ```sh

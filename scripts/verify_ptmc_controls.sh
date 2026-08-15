@@ -4,8 +4,9 @@ set -euo pipefail
 app_file='PlayCover/Views/PlayCoverApp.swift'
 settings_file='PlayCover/Model/AppSettings.swift'
 view_file='PlayCover/Views/AppSettingsView.swift'
+apps_file='PlayCover/ViewModel/AppsVM.swift'
 
-for file in "$app_file" "$settings_file" "$view_file"; do
+for file in "$app_file" "$settings_file" "$view_file" "$apps_file"; do
   test -f "$file"
 done
 
@@ -22,6 +23,13 @@ grep -Fq 'NSWorkspace.didTerminateApplicationNotification' "$app_file"
 
 grep -Fq 'var metalCaptureGlobalHotkeysEnabled = true' "$settings_file"
 grep -Fq 'var metalCaptureFeedbackSounds = true' "$settings_file"
+grep -Fq 'decodeCaptureValue' "$settings_file"
+grep -Fq 'if !suppressPersistence { encode() }' "$settings_file"
+grep -Fq 'options: .atomic' "$settings_file"
+grep -Fq 'preserveUnreadableSettingsIfPresent()' "$settings_file"
+grep -Fq 'defaults.bundleIdentifier = info.bundleIdentifier' "$settings_file"
+grep -Fq 'private var appEntrySignatures: [String: String] = [:]' "$apps_file"
+grep -Fq 'return existing' "$apps_file"
 grep -Fq 'begin_record' "$view_file"
 grep -Fq 'end_record' "$view_file"
 grep -Fq '⌥⌘R toggles recording' "$view_file"

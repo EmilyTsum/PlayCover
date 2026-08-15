@@ -10,6 +10,11 @@ private struct AppLibraryEntry: Sendable {
     let bundleIdentifier: String
     let displayName: String
     let searchText: String
+    let signature: String
+
+    var identityKey: String {
+        bundleIdentifier + "\0" + url.standardizedFileURL.path
+    }
 }
 
 private enum AppLibraryScanner {
@@ -42,11 +47,16 @@ private enum AppLibraryScanner {
         let bundleName = values["CFBundleName"] as? String ?? ""
         let rawDisplayName = values["CFBundleDisplayName"] as? String ?? bundleName
         let displayName = rawDisplayName.isEmpty ? bundleIdentifier : rawDisplayName
+        let resourceValues = try? infoURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        let modified = resourceValues?.contentModificationDate?.timeIntervalSince1970 ?? 0
+        let fileSize = resourceValues?.fileSize ?? data.count
+        let signature = "\(bundleIdentifier)|\(fileSize)|\(modified)"
         return AppLibraryEntry(
             url: url,
             bundleIdentifier: bundleIdentifier,
             displayName: displayName,
-            searchText: "\(displayName) \(bundleName) \(bundleIdentifier)".lowercased()
+            searchText: "\(displayName) \(bundleName) \(bundleIdentifier)".lowercased(),
+            signature: signature
         )
     }
 }
@@ -86,6 +96,7 @@ final class AppsVM: ObservableObject {
     @Published var searchText: String = ""
     @Published var updatingApps = true
     private var fetchTask: Task<Void, Never>?
+    private var appEntrySignatures: [String: String] = [:]
 
     func fetchApps() {
         Task { @MainActor [weak self] in
@@ -107,9 +118,25 @@ final class AppsVM: ObservableObject {
                 }
                 guard !Task.isCancelled else { return }
 
-                // PlayApp initialization performs PlayCover bookkeeping; keep that publication on
-                // the main actor, but only after the expensive directory/plist scan is complete.
-                let loadedApps = entries.map { PlayApp(appUrl: $0.url) }
+                // Preserve PlayApp identity when the installed bundle has not changed. Rebuilding every
+                // PlayApp on fetch leaves open settings sheets holding stale AppSettings objects while
+                // hotkey/runtime code consults the new instances. That can make a setting look unsaved
+                // even though the plist write succeeded. Recreate only when the bundle metadata changes.
+                var existingByKey: [String: PlayApp] = [:]
+                for app in self.apps {
+                    let key = app.info.bundleIdentifier + "\0" + app.url.standardizedFileURL.path
+                    existingByKey[key] = app
+                }
+                var nextSignatures: [String: String] = [:]
+                let loadedApps = entries.map { entry -> PlayApp in
+                    nextSignatures[entry.identityKey] = entry.signature
+                    if let existing = existingByKey[entry.identityKey],
+                       self.appEntrySignatures[entry.identityKey] == entry.signature {
+                        return existing
+                    }
+                    return PlayApp(appUrl: entry.url)
+                }
+                self.appEntrySignatures = nextSignatures
                 self.apps = loadedApps
                 let query = self.searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 self.filteredApps = query.isEmpty ? loadedApps : loadedApps.filter { $0.searchText.contains(query) }
