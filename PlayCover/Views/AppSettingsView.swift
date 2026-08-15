@@ -365,6 +365,7 @@ enum MetalCaptureControl {
     }
 }
 
+// swiftlint:disable:next type_body_length
 struct MetalCaptureView: View {
     @ObservedObject var settings: AppSettings
     let app: PlayApp
