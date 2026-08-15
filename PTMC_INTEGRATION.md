@@ -69,7 +69,23 @@ PlayTools also includes upstream PR #229's fix that preserves the system Metal H
 
 PlayCover captures only the selected game's audio using ScreenCaptureKit application audio at 48 kHz stereo. It writes a temporary sidecar, then muxes it into the finalized PTMC MOV using the first video/audio host-time measurements and a passthrough AVAssetExportSession. No ScreenCaptureKit video output is subscribed. During recording, ScreenCaptureKit PCM samples are encoded to a 48 kHz stereo AAC sidecar using the known-good AVAssetWriter path, while a bounded 512-sample backlog absorbs short writer stalls and is flushed before finalization. Do not use `outputSettings = nil` for these ScreenCaptureKit PCM buffers: that mode caused the v0.1.9 video-only audio regression. v0.1.10 real-device evidence showed periodic tens-of-milliseconds zero-filled PCM despite continuous source PTS and zero writer drops/backpressure; the audio-only SCK configuration therefore keeps its tiny 2x2 internal screen work but uses a 1/60 minimum frame interval instead of the previous 1 fps throttle, with queue depth 8. Diagnostics now record writer drops, queue high-water mark, backpressure transitions, source-timestamp gaps, and >=10 ms near-zero PCM runs (`pcmZeroRuns`, total `pcmZeroMs`, and `pcmZeroMaxMs`). These zero-run counters are evidence of silence in the delivered PCM, not by themselves proof that ScreenCaptureKit synthesized the silence. Before muxing, PlayCover checks that the target volume has enough free space for the second passthrough movie plus a 1 GiB reserve; failed muxes preserve both the original video and audio sidecar. A completed mux is re-opened and required to contain both video and audio tracks before it can replace the original. The temporary `video-only.tmp.mov` step is a same-volume rename, not a third full copy, so an APFS clone is not useful for that replacement step; the dominant temporary allocation is the newly exported muxed movie itself.
 
-A/V sync still requires real-device validation; CI only proves the code builds/packages.
+The target Mac/game was re-tested after the 1/60 ScreenCaptureKit scheduler change and the user confirmed that the previously reproducible periodic audio interruption is no longer occurring. Keep the PCM zero-run counters enabled because this is real-device evidence for the current target, not a guarantee across every macOS release or application. A/V sync still requires separate real-device validation; CI only proves the code builds/packages.
+
+## Capture workflow / operator controls
+
+The PTMC host is designed to stay out of the way during repeated archive recording sessions:
+
+- `⌥⌘R` globally toggles Start/Stop for the frontmost running PlayCover game. If no running PlayCover game is frontmost, the shortcut falls back only when exactly one capture-enabled game is running.
+- `⇧⌥⌘R` is a stop/finalize-only shortcut for recovery when the operator wants to end a recording without reopening the settings window.
+- Carbon hotkeys are registered only while at least one running game has PTMC capture and global shortcuts enabled, so PlayCover does not reserve those keys system-wide while no eligible game is running.
+- Start/Stop feedback uses the macOS system `begin_record` / `end_record` sound assets when present, falling back to standard macOS sounds. Feedback originates from the PlayCover host, not the target-game application audio filter.
+- The Dock tile shows `REC` while the host believes a PTMC recording is active.
+- Closing the last PlayCover window no longer quits the host, so shortcuts and target-app audio can continue while the game is foreground. Explicit Quit still works.
+- If PlayCover is running when an autostart-enabled game launches, the in-game runtime still owns video autostart while the host retries briefly until ScreenCaptureKit can attach the target-game audio stream.
+- Explicitly quitting PlayCover while a host-tracked recording is active asks the capture to stop and waits for audio/finalization cleanup before allowing termination, reducing accidental sidecar/video loss.
+- A low-staging-space warning is logged below 20 GiB; mux itself still performs the stricter file-size-aware preflight before creating a second passthrough movie.
+
+These host controls do not alter the Metal present/encode hot path. The keyboard path only posts the same bundle-targeted Start/Stop commands used by the Capture settings UI.
 
 ## PlayCover host-side improvements
 
@@ -105,7 +121,7 @@ These were reviewed and intentionally incorporated rather than blindly merging a
 
 ## Runtime control
 
-Per-game Capture settings are written to a PTMC runtime plist and launch environment. Start/Stop/status use bundle-targeted Darwin notifications (`io.playcover.ptmc.<command>.<bundle-id>`). The game writes partial/final MOVs under PlayCover's container; PlayCover exports completed files to `~/Movies` or the chosen directory.
+Per-game Capture settings are written to a PTMC runtime plist and launch environment. UI and global-hotkey Start/Stop/status use the same bundle-targeted Darwin notifications (`io.playcover.ptmc.<command>.<bundle-id>`). The game writes partial/final MOVs under PlayCover's container; PlayCover exports completed files to `~/Movies` or the chosen directory. Global shortcut and feedback-sound preferences are host-only settings and are not injected into the game process.
 
 `scripts/ptmcctl.swift` can inspect and control the same runtime on macOS:
 

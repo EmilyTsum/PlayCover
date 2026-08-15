@@ -66,6 +66,9 @@ jobs:
       - name: Validate PTMC audio writer invariants
         run: scripts/verify_ptmc_audio.sh
 
+      - name: Validate PTMC host controls invariants
+        run: scripts/verify_ptmc_controls.sh
+
       - name: Build PlayCover PTMC
         shell: bash
         run: |

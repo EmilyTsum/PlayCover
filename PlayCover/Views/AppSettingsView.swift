@@ -755,6 +755,174 @@ private extension MetalCaptureAudioRecorder {
     }
 }
 
+enum MetalCaptureInvocationSource: String {
+    case ui
+    case hotkey
+    case autostart
+    case gameExit
+    case quit
+}
+
+struct MetalCaptureHostStartResult {
+    let requested: Bool
+    let audioState: String
+}
+
+struct MetalCaptureHostStopResult {
+    let requested: Bool
+    let audioState: String
+    let audioResult: MetalCaptureAudioResult?
+}
+
+@MainActor
+enum MetalCaptureFeedback {
+    private static var currentSound: NSSound?
+
+    static func playStart() {
+        playSystemRecordingSound(fileName: "begin_record", fallbackName: "Tink")
+    }
+
+    static func playStop() {
+        playSystemRecordingSound(fileName: "end_record", fallbackName: "Pop")
+    }
+
+    static func playError() {
+        if let sound = NSSound(named: NSSound.Name("Basso")) {
+            play(sound)
+        } else {
+            NSSound.beep()
+        }
+    }
+
+    private static func playSystemRecordingSound(fileName: String, fallbackName: String) {
+        let candidates = [
+            "/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/\(fileName).caf",
+            "/System/Library/Audio/UISounds/\(fileName).caf"
+        ]
+        for path in candidates where FileManager.default.fileExists(atPath: path) {
+            if let sound = NSSound(contentsOfFile: path, byReference: true) {
+                play(sound)
+                return
+            }
+        }
+        if let sound = NSSound(named: NSSound.Name(fallbackName)) {
+            play(sound)
+        } else {
+            NSSound.beep()
+        }
+    }
+
+    private static func play(_ sound: NSSound) {
+        currentSound?.stop()
+        currentSound = sound
+        sound.play()
+    }
+}
+
+@MainActor
+enum MetalCaptureHostWorkflow {
+    static func start(app: PlayApp, source: MetalCaptureInvocationSource) async -> MetalCaptureHostStartResult {
+        let bundleIdentifier = app.info.bundleIdentifier
+        let capture = app.settings.settings
+        guard capture.metalCaptureEnabled else {
+            Log.shared.log(
+                "PTMC \(source.rawValue) start ignored: capture is disabled for \(bundleIdentifier)",
+                isError: true
+            )
+            if capture.metalCaptureFeedbackSounds { MetalCaptureFeedback.playError() }
+            return MetalCaptureHostStartResult(requested: false, audioState: "disabled")
+        }
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty else {
+            Log.shared.log(
+                "PTMC \(source.rawValue) start ignored: game is not running (\(bundleIdentifier))",
+                isError: true
+            )
+            if capture.metalCaptureFeedbackSounds { MetalCaptureFeedback.playError() }
+            return MetalCaptureHostStartResult(requested: false, audioState: "game not running")
+        }
+
+        warnIfCaptureStorageIsLow(bundleIdentifier: bundleIdentifier)
+        var audioState = capture.metalCaptureAudioEnabled ? "preparing" : "disabled"
+        if capture.metalCaptureAudioEnabled {
+            if #available(macOS 13.0, *) {
+                do {
+                    try await MetalCaptureAudioRecorder.shared.start(bundleIdentifier: bundleIdentifier)
+                    audioState = "capturing"
+                } catch {
+                    audioState = "error"
+                    Log.shared.log(
+                        "PTMC game-audio capture unavailable: \(error.localizedDescription)",
+                        isError: true
+                    )
+                }
+            } else {
+                audioState = "unsupported"
+            }
+        }
+
+        MetalCaptureControl.post("start", bundleIdentifier: bundleIdentifier, settings: capture)
+        if capture.metalCaptureFeedbackSounds { MetalCaptureFeedback.playStart() }
+        Log.shared.log("PTMC recording start requested via \(source.rawValue): \(bundleIdentifier)")
+        return MetalCaptureHostStartResult(requested: true, audioState: audioState)
+    }
+
+    static func stop(app: PlayApp, source: MetalCaptureInvocationSource) async -> MetalCaptureHostStopResult {
+        let bundleIdentifier = app.info.bundleIdentifier
+        let capture = app.settings.settings
+        MetalCaptureControl.post("stop", bundleIdentifier: bundleIdentifier, settings: capture)
+        if capture.metalCaptureFeedbackSounds { MetalCaptureFeedback.playStop() }
+        Log.shared.log("PTMC recording stop requested via \(source.rawValue): \(bundleIdentifier)")
+
+        var audioResult: MetalCaptureAudioResult?
+        var audioState = capture.metalCaptureAudioEnabled ? "finalizing" : "disabled"
+        if #available(macOS 13.0, *) {
+            audioResult = await MetalCaptureAudioRecorder.shared.stop()
+            if let audioResult {
+                audioState = "muxing • drop \(audioResult.droppedSamples) • " +
+                    "source gaps \(audioResult.sourceGapCount) • zero runs \(audioResult.pcmZeroRunCount)"
+                logAudioResult(audioResult)
+            } else if capture.metalCaptureAudioEnabled {
+                audioState = "none"
+            }
+        }
+
+        MetalCaptureControl.exportAfterFinalization(
+            bundleIdentifier: bundleIdentifier,
+            outputDirectory: capture.metalCaptureOutputDirectory,
+            audioResult: audioResult
+        )
+        return MetalCaptureHostStopResult(requested: true, audioState: audioState, audioResult: audioResult)
+    }
+
+    private static func logAudioResult(_ audioResult: MetalCaptureAudioResult) {
+        Log.shared.log(
+            "PTMC audio finalized: drops=\(audioResult.droppedSamples) " +
+            "peakQueue=\(audioResult.peakPendingSamples) " +
+            "backpressure=\(audioResult.backpressureEvents) " +
+            "sourceGaps=\(audioResult.sourceGapCount) " +
+            "sourceGapMs=\(String(format: "%.1f", audioResult.sourceGapSeconds * 1000)) " +
+            "pcmZeroRuns=\(audioResult.pcmZeroRunCount) " +
+            "pcmZeroMs=\(String(format: "%.1f", audioResult.pcmZeroSeconds * 1000)) " +
+            "pcmZeroMaxMs=\(String(format: "%.1f", audioResult.pcmZeroMaxSeconds * 1000)) " +
+            "path=AAC 256k"
+        )
+    }
+
+    private static func warnIfCaptureStorageIsLow(bundleIdentifier: String) {
+        let directory = MetalCapturePaths.captureDirectory(for: bundleIdentifier)
+        MetalCapturePaths.prepare(for: bundleIdentifier)
+        guard let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+              let capacity = values.volumeAvailableCapacityForImportantUsage else { return }
+        let warningThreshold: Int64 = 20 * 1024 * 1024 * 1024
+        if capacity < warningThreshold {
+            Log.shared.log(
+                "PTMC capture storage is low: \(capacity / 1_073_741_824) GiB available in staging volume",
+                isError: true
+            )
+        }
+    }
+}
+
 enum MetalCaptureControl {
     static func post(_ command: String, bundleIdentifier: String, settings: AppSettingsData? = nil) {
         guard let typedCommand = MetalCaptureCommand(rawValue: command) else { return }
@@ -1073,6 +1241,17 @@ struct MetalCaptureView: View {
                     Toggle("Start recording automatically when the game launches",
                            isOn: $settings.settings.metalCaptureAutostart)
 
+                    Toggle("Enable global recording shortcuts",
+                           isOn: $settings.settings.metalCaptureGlobalHotkeysEnabled)
+                    Text("⌥⌘R toggles recording. ⇧⌥⌘R always stops/finalizes. " +
+                         "The shortcuts keep working while the game is focused and after the PlayCover window closes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Toggle("Play recording start/stop sounds",
+                           isOn: $settings.settings.metalCaptureFeedbackSounds)
+                        .help("Uses the system recording sounds when available, with macOS system-sound fallbacks.")
+
                     HStack {
                         Text("Video codec")
                         Spacer()
@@ -1277,12 +1456,18 @@ struct MetalCaptureView: View {
                             }
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(captureIsActive)
 
                         Button("Stop Recording") {
                             Task {
                                 await stopRecording()
                             }
                         }
+                        .disabled(!captureIsActive)
+
+                        Text("⌥⌘R")
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
 
                         Button("Refresh Status") {
                             MetalCaptureControl.post(
@@ -1309,7 +1494,8 @@ struct MetalCaptureView: View {
                     }
 
                     Text("Start/Stop/Status target only this game's bundle identifier. " +
-                         "The runtime panel above refreshes automatically while this settings window is open.")
+                         "Global shortcuts prefer the frontmost running PlayCover game, or the only running " +
+                         "capture-enabled game when there is no unique foreground match.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1336,6 +1522,10 @@ struct MetalCaptureView: View {
         }
         .onChange(of: settings.settings.metalCaptureEnabled) { enabled in
             syncRuntimeConfiguration(command: enabled ? "status" : "stop")
+            PTMCGlobalHotKeyManager.shared.refreshRegistration()
+        }
+        .onChange(of: settings.settings.metalCaptureGlobalHotkeysEnabled) { _ in
+            PTMCGlobalHotKeyManager.shared.refreshRegistration()
         }
         .onChange(of: settings.settings.metalCaptureForceSDRDisplay) { _ in
             syncRuntimeConfiguration(command: "status")
@@ -1497,6 +1687,11 @@ struct MetalCaptureView: View {
         }
     }
 
+    private var captureIsActive: Bool {
+        guard let phase = captureStatus?.phase else { return false }
+        return ["requested", "armed", "recording", "stopping"].contains(phase)
+    }
+
     private var isRuntimeBusy: Bool {
         guard let phase = captureStatus?.phase else { return commandSentAt != nil && gameRunning }
         return ["requested", "armed", "recording", "active", "stopping"].contains(phase)
@@ -1531,75 +1726,23 @@ struct MetalCaptureView: View {
 
     @MainActor
     private func startRecording() async {
-        audioState = settings.settings.metalCaptureAudioEnabled ? "preparing" : "disabled"
-        if settings.settings.metalCaptureAudioEnabled {
-            if #available(macOS 13.0, *) {
-                do {
-                    try await MetalCaptureAudioRecorder.shared.start(
-                        bundleIdentifier: app.info.bundleIdentifier
-                    )
-                    audioState = "capturing"
-                } catch {
-                    audioState = "error"
-                    Log.shared.log(
-                        "PTMC game-audio capture unavailable: \(error.localizedDescription)",
-                        isError: true
-                    )
-                }
-            } else {
-                audioState = "unsupported"
-            }
+        let result = await PTMCGlobalHotKeyManager.shared.start(app: app, source: .ui)
+        audioState = result.audioState
+        if result.requested {
+            commandSentAt = Date()
+            commandLabel = "Start"
         }
-
-        commandSentAt = Date()
-        commandLabel = "Start"
-        MetalCaptureControl.post(
-            "start",
-            bundleIdentifier: app.info.bundleIdentifier,
-            settings: settings.settings
-        )
     }
 
     @MainActor
     private func stopRecording() async {
-        commandSentAt = Date()
-        commandLabel = "Stop"
-        MetalCaptureControl.post(
-            "stop",
-            bundleIdentifier: app.info.bundleIdentifier,
-            settings: settings.settings
-        )
-
-        var audioResult: MetalCaptureAudioResult?
-        if #available(macOS 13.0, *) {
-            if settings.settings.metalCaptureAudioEnabled {
-                audioState = "finalizing"
-            }
-            audioResult = await MetalCaptureAudioRecorder.shared.stop()
-            if let audioResult {
-                audioState = "muxing • drop \(audioResult.droppedSamples) • " +
-                    "source gaps \(audioResult.sourceGapCount) • zero runs \(audioResult.pcmZeroRunCount)"
-                Log.shared.log(
-                    "PTMC audio finalized: drops=\(audioResult.droppedSamples) " +
-                    "peakQueue=\(audioResult.peakPendingSamples) " +
-                    "backpressure=\(audioResult.backpressureEvents) " +
-                    "sourceGaps=\(audioResult.sourceGapCount) " +
-                    "sourceGapMs=\(String(format: "%.1f", audioResult.sourceGapSeconds * 1000)) " +
-                    "pcmZeroRuns=\(audioResult.pcmZeroRunCount) " +
-                    "pcmZeroMs=\(String(format: "%.1f", audioResult.pcmZeroSeconds * 1000)) " +
-                    "pcmZeroMaxMs=\(String(format: "%.1f", audioResult.pcmZeroMaxSeconds * 1000)) " +
-                    "path=AAC 256k"
-                )
-            } else {
-                audioState = settings.settings.metalCaptureAudioEnabled ? "none" : "disabled"
-            }
+        let result = await PTMCGlobalHotKeyManager.shared.stop(app: app, source: .ui)
+        audioState = result.audioState
+        if result.requested {
+            commandSentAt = Date()
+            commandLabel = "Stop"
         }
-        MetalCaptureControl.exportAfterFinalization(
-            bundleIdentifier: app.info.bundleIdentifier,
-            outputDirectory: settings.settings.metalCaptureOutputDirectory,
-            audioResult: audioResult
-        )
-        if let audioResult {
+        if let audioResult = result.audioResult {
             for _ in 0..<120 {
                 if !FileManager.default.fileExists(atPath: audioResult.url.path) {
                     audioState = "muxed"
