@@ -33,6 +33,7 @@ enum MetalCapturePaths {
         let values: [String: Any] = [
             "enabled": settings.metalCaptureEnabled,
             "autostart": settings.metalCaptureAutostart,
+            "codec": settings.metalCaptureCodec,
             "fps": min(max(settings.metalCaptureFPS, 1), 240),
             "bitrate": min(max(settings.metalCaptureBitrateMbps, 1), 1000) * 1_000_000,
             "buffers": min(max(settings.metalCaptureBuffers, 3), 16),
@@ -318,6 +319,7 @@ extension PlayApp {
             // PTMC hooks initialize dormant even when capture is disabled.
             "PTMC_ENABLE": capture.metalCaptureEnabled ? "1" : "0",
             "PTMC_AUTOSTART": capture.metalCaptureEnabled && capture.metalCaptureAutostart ? "1" : "0",
+            "PTMC_CODEC": capture.metalCaptureCodec,
             "PTMC_FPS": String(fps),
             "PTMC_BITRATE": String(bitrateMbps * 1_000_000),
             "PTMC_BUFFERS": String(buffers),

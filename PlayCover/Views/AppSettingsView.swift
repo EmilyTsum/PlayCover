@@ -8,6 +8,8 @@
 import SwiftUI
 import DataCache
 import CoreFoundation
+import AVFoundation
+import ScreenCaptureKit
 
 enum BlockingTask {
     case none, playTools, introspection, iosFrameworks, applicationCategoryType
@@ -239,6 +241,9 @@ struct MetalCaptureStatus {
     let droppedEncoder: Int
     let droppedLate: Int
     let unsupported: Int
+    let skippedRate: Int
+    let codec: String
+    let firstVideoHostTimeNs: UInt64
     let displaySync: Int
     let framebufferOnly: Int
     let edr: Int
@@ -270,6 +275,9 @@ struct MetalCaptureStatus {
             droppedEncoder: integer("droppedEncoder"),
             droppedLate: integer("droppedLate"),
             unsupported: integer("unsupported"),
+            skippedRate: integer("skippedRate"),
+            codec: values["codec"] as? String ?? "hevc",
+            firstVideoHostTimeNs: (values["firstVideoHostTimeNs"] as? NSNumber)?.uint64Value ?? 0,
             displaySync: integer("displaySync"),
             framebufferOnly: integer("framebufferOnly"),
             edr: integer("edr"),
@@ -283,6 +291,182 @@ struct MetalCaptureStatus {
 extension MetalCaptureStatus {
     var totalDrops: Int { droppedPool + droppedEncoder + droppedLate + unsupported }
     var requestedMetricsVisible: Bool { presented > 0 || captured > 0 || encoded > 0 || totalDrops > 0 }
+}
+
+
+struct MetalCaptureAudioResult {
+    let url: URL
+    let firstHostTimeNs: UInt64
+}
+
+@available(macOS 12.3, *)
+final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
+    static let shared = MetalCaptureAudioRecorder()
+
+    private(set) var droppedSamples = 0
+
+    private let sampleQueue = DispatchQueue(label: "io.playcover.ptmc.audio", qos: .userInitiated)
+    private var stream: SCStream?
+    private var writer: AVAssetWriter?
+    private var writerInput: AVAssetWriterInput?
+    private var outputURL: URL?
+    private var firstHostTimeNs: UInt64 = 0
+    private var appendedSamples = 0
+
+    func start(bundleIdentifier: String) async throws {
+        _ = await stop()
+        droppedSamples = 0
+        firstHostTimeNs = 0
+        appendedSamples = 0
+
+        let content = try await SCShareableContent.excludingDesktopWindows(
+            false,
+            onScreenWindowsOnly: false
+        )
+        guard let application = content.applications.first(where: {
+            $0.bundleIdentifier == bundleIdentifier
+        }) else {
+            throw "PTMC audio: target application is not available to ScreenCaptureKit"
+        }
+        guard let display = content.displays.first else {
+            throw "PTMC audio: no display is available for the application audio filter"
+        }
+
+        let filter = SCContentFilter(
+            display: display,
+            including: [application],
+            exceptingWindows: []
+        )
+        let configuration = SCStreamConfiguration()
+        configuration.capturesAudio = true
+        configuration.excludesCurrentProcessAudio = true
+        configuration.sampleRate = 48_000
+        configuration.channelCount = 2
+        // PTMC only subscribes to the audio output. Keep any internal screen work negligible.
+        configuration.width = 2
+        configuration.height = 2
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        configuration.queueDepth = 2
+        configuration.showsCursor = false
+
+        let directory = MetalCapturePaths.captureDirectory(for: bundleIdentifier)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let audioURL = directory.appendingPathComponent("PTMC-Audio-active.m4a")
+        try? FileManager.default.removeItem(at: audioURL)
+
+        let assetWriter = try AVAssetWriter(outputURL: audioURL, fileType: .m4a)
+        let input = AVAssetWriterInput(
+            mediaType: .audio,
+            outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 48_000,
+                AVNumberOfChannelsKey: 2,
+                AVEncoderBitRateKey: 256_000
+            ]
+        )
+        input.expectsMediaDataInRealTime = true
+        guard assetWriter.canAdd(input) else {
+            throw "PTMC audio: AVAssetWriter rejected the AAC input"
+        }
+        assetWriter.add(input)
+
+        let captureStream = SCStream(filter: filter, configuration: configuration, delegate: self)
+        try captureStream.addStreamOutput(self, type: .audio, sampleHandlerQueue: sampleQueue)
+
+        writer = assetWriter
+        writerInput = input
+        outputURL = audioURL
+        stream = captureStream
+        try await captureStream.startCapture()
+    }
+
+    func stop() async -> MetalCaptureAudioResult? {
+        let activeStream = stream
+        stream = nil
+        if let activeStream {
+            do {
+                try await activeStream.stopCapture()
+            } catch {
+                Log.shared.log("PTMC audio stop failed: \(error.localizedDescription)", isError: true)
+            }
+        }
+
+        let result: MetalCaptureAudioResult? = await withCheckedContinuation { continuation in
+            sampleQueue.async {
+                guard let writer = self.writer,
+                      let input = self.writerInput,
+                      let url = self.outputURL,
+                      self.appendedSamples > 0 else {
+                    if let url = self.outputURL { try? FileManager.default.removeItem(at: url) }
+                    self.clearWriterState()
+                    continuation.resume(returning: nil)
+                    return
+                }
+                input.markAsFinished()
+                writer.finishWriting {
+                    let completed = writer.status == .completed
+                    let result = completed
+                        ? MetalCaptureAudioResult(url: url, firstHostTimeNs: self.firstHostTimeNs)
+                        : nil
+                    if !completed {
+                        Log.shared.log(
+                            "PTMC audio writer failed: \(writer.error?.localizedDescription ?? \"unknown error\")",
+                            isError: true
+                        )
+                        try? FileManager.default.removeItem(at: url)
+                    }
+                    self.clearWriterState()
+                    continuation.resume(returning: result)
+                }
+            }
+        }
+        return result
+    }
+
+    func stream(
+        _ stream: SCStream,
+        didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
+        of outputType: SCStreamOutputType
+    ) {
+        guard outputType == .audio,
+              sampleBuffer.isValid,
+              let writer,
+              let input = writerInput else { return }
+
+        if firstHostTimeNs == 0 {
+            firstHostTimeNs = DispatchTime.now().uptimeNanoseconds
+        }
+        if writer.status == .unknown {
+            guard writer.startWriting() else {
+                return
+            }
+            writer.startSession(atSourceTime: sampleBuffer.presentationTimeStamp)
+        }
+        guard writer.status == .writing else { return }
+        guard input.isReadyForMoreMediaData else {
+            droppedSamples += 1
+            return
+        }
+        if input.append(sampleBuffer) {
+            appendedSamples += 1
+        } else {
+            droppedSamples += 1
+        }
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        Log.shared.log("PTMC audio stream stopped: \(error.localizedDescription)", isError: true)
+    }
+
+    private func clearWriterState() {
+        writer = nil
+        writerInput = nil
+        outputURL = nil
+        firstHostTimeNs = 0
+        appendedSamples = 0
+    }
+
+    }
 }
 
 enum MetalCaptureControl {
@@ -348,11 +532,30 @@ enum MetalCaptureControl {
         }
     }
 
-    static func exportAfterFinalization(bundleIdentifier: String, outputDirectory: String) {
+    static func exportAfterFinalization(
+        bundleIdentifier: String,
+        outputDirectory: String,
+        audioResult: MetalCaptureAudioResult? = nil
+    ) {
         Task.detached(priority: .utility) {
-            for _ in 0..<80 {
+            for _ in 0..<120 {
                 if let status = MetalCaptureStatus.read(bundleIdentifier: bundleIdentifier),
                    status.phase == "finalized" {
+                    if let audioResult,
+                       let outputPath = status.outputPath {
+                        let videoURL = URL(fileURLWithPath: outputPath)
+                        let muxed = await muxAudio(
+                            videoURL: videoURL,
+                            audioResult: audioResult,
+                            firstVideoHostTimeNs: status.firstVideoHostTimeNs
+                        )
+                        if !muxed {
+                            Log.shared.log(
+                                "PTMC audio mux failed; preserving video-only capture and audio sidecar",
+                                isError: true
+                            )
+                        }
+                    }
                     exportCompletedCaptures(
                         bundleIdentifier: bundleIdentifier,
                         outputDirectory: outputDirectory
@@ -361,8 +564,121 @@ enum MetalCaptureControl {
                 }
                 try? await Task.sleep(nanoseconds: 250_000_000)
             }
+            Log.shared.log("PTMC finalize timed out while waiting to export capture", isError: true)
         }
     }
+
+    private static func muxAudio(
+        videoURL: URL,
+        audioResult: MetalCaptureAudioResult,
+        firstVideoHostTimeNs: UInt64
+    ) async -> Bool {
+        guard FileManager.default.fileExists(atPath: videoURL.path),
+              FileManager.default.fileExists(atPath: audioResult.url.path) else { return false }
+
+        let videoAsset = AVURLAsset(url: videoURL)
+        let audioAsset = AVURLAsset(url: audioResult.url)
+        guard let sourceVideo = videoAsset.tracks(withMediaType: .video).first,
+              let sourceAudio = audioAsset.tracks(withMediaType: .audio).first else { return false }
+
+        let composition = AVMutableComposition()
+        guard let videoTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ), let audioTrack = composition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else { return false }
+
+        do {
+            try videoTrack.insertTimeRange(
+                CMTimeRange(start: .zero, duration: videoAsset.duration),
+                of: sourceVideo,
+                at: .zero
+            )
+
+            let videoDuration = videoAsset.duration
+            let audioDuration = audioAsset.duration
+            let deltaNs: Int64
+            if firstVideoHostTimeNs > 0 {
+                deltaNs = Int64(clamping: firstVideoHostTimeNs) - Int64(clamping: audioResult.firstHostTimeNs)
+            } else {
+                deltaNs = 0
+            }
+
+            let billion: CMTimeScale = 1_000_000_000
+            if deltaNs >= 0 {
+                let trim = CMTime(value: deltaNs, timescale: billion)
+                let remaining = CMTimeSubtract(audioDuration, trim)
+                let duration = minimumTime(remaining, videoDuration)
+                if duration > .zero {
+                    try audioTrack.insertTimeRange(
+                        CMTimeRange(start: trim, duration: duration),
+                        of: sourceAudio,
+                        at: .zero
+                    )
+                }
+            } else {
+                let insertion = CMTime(value: -deltaNs, timescale: billion)
+                let availableVideo = CMTimeSubtract(videoDuration, insertion)
+                let duration = minimumTime(audioDuration, availableVideo)
+                if duration > .zero {
+                    try audioTrack.insertTimeRange(
+                        CMTimeRange(start: .zero, duration: duration),
+                        of: sourceAudio,
+                        at: insertion
+                    )
+                }
+            }
+        } catch {
+            Log.shared.log("PTMC composition failed: \(error.localizedDescription)", isError: true)
+            return false
+        }
+
+        let muxedURL = videoURL.deletingPathExtension().appendingPathExtension("muxed.mov")
+        try? FileManager.default.removeItem(at: muxedURL)
+        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+            return false
+        }
+        exporter.outputURL = muxedURL
+        exporter.outputFileType = .mov
+        let exported = await withCheckedContinuation { continuation in
+            exporter.exportAsynchronously {
+                continuation.resume(returning: exporter.status == .completed)
+            }
+        }
+        guard exported else {
+            Log.shared.log(
+                "PTMC mux export failed: \(exporter.error?.localizedDescription ?? \"unknown error\")",
+                isError: true
+            )
+            return false
+        }
+
+        let backupURL = videoURL.deletingPathExtension().appendingPathExtension("video-only.tmp.mov")
+        let fileManager = FileManager.default
+        do {
+            try? fileManager.removeItem(at: backupURL)
+            try fileManager.moveItem(at: videoURL, to: backupURL)
+            do {
+                try fileManager.moveItem(at: muxedURL, to: videoURL)
+                try? fileManager.removeItem(at: backupURL)
+                try? fileManager.removeItem(at: audioResult.url)
+                return true
+            } catch {
+                try? fileManager.moveItem(at: backupURL, to: videoURL)
+                throw error
+            }
+        } catch {
+            Log.shared.log("PTMC mux replace failed: \(error.localizedDescription)", isError: true)
+            return false
+        }
+    }
+
+    private static func minimumTime(_ lhs: CMTime, _ rhs: CMTime) -> CMTime {
+        CMTimeCompare(lhs, rhs) <= 0 ? lhs : rhs
+    }
+
 }
 
 // swiftlint:disable:next type_body_length
@@ -377,6 +693,7 @@ struct MetalCaptureView: View {
     @State private var gameRunning = false
     @State private var partialFiles = 0
     @State private var completedFiles = 0
+    @State private var audioState = "idle"
 
     private var defaultOutputDescription: String {
         FileManager.default.homeDirectoryForCurrentUser
@@ -427,6 +744,21 @@ struct MetalCaptureView: View {
                            isOn: $settings.settings.metalCaptureAutostart)
 
                     HStack {
+                        Text("Video codec")
+                        Spacer()
+                        Picker("", selection: $settings.settings.metalCaptureCodec) {
+                            Text("HEVC (hardware)").tag("hevc")
+                            Text("ProRes 422 LT").tag("prores422lt")
+                            Text("ProRes 422").tag("prores422")
+                            Text("ProRes 422 HQ").tag("prores422hq")
+                        }
+                        .frame(width: 180)
+                    }
+
+                    Toggle("Record game audio", isOn: $settings.settings.metalCaptureAudioEnabled)
+                        .help("Captures only the target game's audio with ScreenCaptureKit at 48 kHz stereo AAC.")
+
+                    HStack {
                         Text("Capture frame rate")
                         Spacer()
                         Stepper(value: $settings.settings.metalCaptureFPS, in: 1...240) {
@@ -436,14 +768,21 @@ struct MetalCaptureView: View {
                         }
                     }
 
-                    HStack {
-                        Text("HEVC bitrate")
-                        Spacer()
-                        Stepper(value: $settings.settings.metalCaptureBitrateMbps, in: 1...1000, step: 10) {
-                            Text("\(settings.settings.metalCaptureBitrateMbps) Mbps")
-                                .monospacedDigit()
-                                .frame(width: 110, alignment: .trailing)
+                    if settings.settings.metalCaptureCodec == "hevc" {
+                        HStack {
+                            Text("HEVC bitrate")
+                            Spacer()
+                            Stepper(value: $settings.settings.metalCaptureBitrateMbps, in: 1...1000, step: 10) {
+                                Text("\(settings.settings.metalCaptureBitrateMbps) Mbps")
+                                    .monospacedDigit()
+                                    .frame(width: 110, alignment: .trailing)
+                            }
                         }
+                    } else {
+                        Text("ProRes uses VideoToolbox hardware encoding when available and ignores the HEVC bitrate setting. " +
+                             "At 4K/120, disk bandwidth can be very high, especially with 422 HQ.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     HStack {
@@ -522,28 +861,16 @@ struct MetalCaptureView: View {
 
                     HStack {
                         Button("Start Recording") {
-                            commandSentAt = Date()
-                            commandLabel = "Start"
-                            MetalCaptureControl.post(
-                                "start",
-                                bundleIdentifier: app.info.bundleIdentifier,
-                                settings: settings.settings
-                            )
+                            Task {
+                                await startRecording()
+                            }
                         }
                         .buttonStyle(.borderedProminent)
 
                         Button("Stop Recording") {
-                            commandSentAt = Date()
-                            commandLabel = "Stop"
-                            MetalCaptureControl.post(
-                                "stop",
-                                bundleIdentifier: app.info.bundleIdentifier,
-                                settings: settings.settings
-                            )
-                            MetalCaptureControl.exportAfterFinalization(
-                                bundleIdentifier: app.info.bundleIdentifier,
-                                outputDirectory: settings.settings.metalCaptureOutputDirectory
-                            )
+                            Task {
+                                await stopRecording()
+                            }
                         }
 
                         Button("Refresh Status") {
@@ -615,6 +942,9 @@ struct MetalCaptureView: View {
         .onChange(of: settings.settings.metalCaptureSpoofMaxFPS) { _ in
             syncRuntimeConfiguration(command: "status")
         }
+        .onChange(of: settings.settings.metalCaptureCodec) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
         .onChange(of: settings.settings.metalCaptureFPS) { _ in
             syncRuntimeConfiguration(command: "status")
         }
@@ -655,8 +985,9 @@ struct MetalCaptureView: View {
 
             if let status = captureStatus {
                 Text(
-                    "hooks \(status.presentHookCount) • presented \(status.presented) • " +
-                    "captured \(status.captured) • encoded \(status.encoded) • drops \(status.totalDrops)"
+                    "hooks \(status.presentHookCount) • \(status.codec.uppercased()) • presented \(status.presented) • " +
+                    "captured \(status.captured) • encoded \(status.encoded) • drops \(status.totalDrops) • " +
+                    "rate-skip \(status.skippedRate)"
                 )
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -677,7 +1008,7 @@ struct MetalCaptureView: View {
                 .foregroundStyle(.secondary)
             }
 
-            Text("staging: \(partialFiles) recording • \(completedFiles) completed")
+            Text("staging: \(partialFiles) recording • \(completedFiles) completed • audio \(audioState)")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
@@ -713,6 +1044,73 @@ struct MetalCaptureView: View {
             return "The game process is running, but PTMC has not published a status heartbeat yet."
         }
         return "Launch the game to establish a PTMC runtime heartbeat."
+    }
+
+    @MainActor
+    private func startRecording() async {
+        audioState = settings.settings.metalCaptureAudioEnabled ? "preparing" : "disabled"
+        if settings.settings.metalCaptureAudioEnabled {
+            if #available(macOS 12.3, *) {
+                do {
+                    try await MetalCaptureAudioRecorder.shared.start(
+                        bundleIdentifier: app.info.bundleIdentifier
+                    )
+                    audioState = "capturing"
+                } catch {
+                    audioState = "error"
+                    Log.shared.log(
+                        "PTMC game-audio capture unavailable: \(error.localizedDescription)",
+                        isError: true
+                    )
+                }
+            } else {
+                audioState = "unsupported"
+            }
+        }
+
+        commandSentAt = Date()
+        commandLabel = "Start"
+        MetalCaptureControl.post(
+            "start",
+            bundleIdentifier: app.info.bundleIdentifier,
+            settings: settings.settings
+        )
+    }
+
+    @MainActor
+    private func stopRecording() async {
+        commandSentAt = Date()
+        commandLabel = "Stop"
+        MetalCaptureControl.post(
+            "stop",
+            bundleIdentifier: app.info.bundleIdentifier,
+            settings: settings.settings
+        )
+
+        var audioResult: MetalCaptureAudioResult?
+        if #available(macOS 12.3, *) {
+            if settings.settings.metalCaptureAudioEnabled {
+                audioState = "finalizing"
+            }
+            audioResult = await MetalCaptureAudioRecorder.shared.stop()
+            audioState = audioResult == nil
+                ? (settings.settings.metalCaptureAudioEnabled ? "none" : "disabled")
+                : "muxing"
+        }
+        MetalCaptureControl.exportAfterFinalization(
+            bundleIdentifier: app.info.bundleIdentifier,
+            outputDirectory: settings.settings.metalCaptureOutputDirectory,
+            audioResult: audioResult
+        )
+        if let audioResult {
+            for _ in 0..<120 {
+                if !FileManager.default.fileExists(atPath: audioResult.url.path) {
+                    audioState = "muxed"
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
     }
 
     private func statusAgeText(_ status: MetalCaptureStatus) -> String {

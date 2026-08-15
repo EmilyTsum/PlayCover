@@ -55,6 +55,8 @@ struct AppSettingsData: Codable {
     var ignoreUnityKeyboardInitializationError = false
     var metalCaptureEnabled = false
     var metalCaptureAutostart = false
+    var metalCaptureCodec = "hevc"
+    var metalCaptureAudioEnabled = true
     var metalCaptureFPS = 120
     var metalCaptureBitrateMbps = 120
     var metalCaptureBuffers = 6
@@ -109,6 +111,8 @@ struct AppSettingsData: Codable {
             Bool.self, forKey: .ignoreUnityKeyboardInitializationError) ?? false
         metalCaptureEnabled = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureEnabled) ?? false
         metalCaptureAutostart = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureAutostart) ?? false
+        metalCaptureCodec = try container.decodeIfPresent(String.self, forKey: .metalCaptureCodec) ?? "hevc"
+        metalCaptureAudioEnabled = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureAudioEnabled) ?? true
         metalCaptureFPS = try container.decodeIfPresent(Int.self, forKey: .metalCaptureFPS) ?? 120
         metalCaptureBitrateMbps = try container.decodeIfPresent(Int.self, forKey: .metalCaptureBitrateMbps) ?? 120
         metalCaptureBuffers = try container.decodeIfPresent(Int.self, forKey: .metalCaptureBuffers) ?? 6

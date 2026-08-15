@@ -2,7 +2,7 @@
 
 This branch follows upstream PlayCover `develop` and bundles the public `EmilyTsum/PlayTools` `metal-capture` branch.
 
-Pinned PlayTools commit at this revision: `2199beccda222669171fd3b56aaf20846edd3498`.
+Pinned PlayTools commit at this revision: `c2207bf4e3e52624b96ef990c728f95a9b896eac`.
 
 ## User-facing control
 
@@ -29,3 +29,11 @@ Real-device analysis on Apple Silicon/macOS 27 found that concrete AGX command-b
 The same analysis ruled out environment propagation, stale PlayTools, missing injection, Darwin notification delivery, and sandbox write permissions. Runtime status now includes a one-second heartbeat and present-hook count so a broken hook path is visible without manually refreshing the UI.
 
 SDR enforcement now applies whenever capture is enabled, not only after Start Recording. PTMC blocks EDR requests and normalizes `CAMetalLayer.colorspace` to standard sRGB while leaving the game's Metal pixel format untouched. The real-device evidence that motivated these changes is kept in `docs/PTMC/FAILURE_ANALYSIS_REAL_DEVICE.md`.
+
+## Real-device capture path
+
+PTMC now intercepts both `MTLCommandBuffer presentDrawable:*` and direct `CAMetalDrawable present*` submission paths. Unity titles observed on Apple Silicon use the latter directly. Frame-path hooks are installed lazily only when recording starts, implementation owners are deduplicated, and dormant wrappers use a fast-path so PTMC has near-zero overhead before the first recording.
+
+The capture FPS setting is an actual sampling ceiling: a 120 Hz game captured at 60 fps skips conversion/encode work for intermediate presents instead of merely tagging the encoder as 60 fps. Video codecs are HEVC plus hardware-required Apple ProRes 422 LT / 422 / 422 HQ.
+
+Game audio is captured separately by PlayCover with ScreenCaptureKit's application-level audio filter at 48 kHz stereo AAC, then muxed into the finalized PTMC MOV. No ScreenCaptureKit video frames are used by PTMC.
