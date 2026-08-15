@@ -6,6 +6,8 @@
 import SwiftUI
 import Carbon.HIToolbox
 
+// swiftlint:disable file_length
+
 private let ptmcHotKeySignature = OSType(0x50544D43) // 'PTMC'
 private let ptmcToggleHotKeyID: UInt32 = 1
 private let ptmcStopHotKeyID: UInt32 = 2
@@ -34,6 +36,7 @@ private func ptmcHotKeyHandler(
 }
 
 @MainActor
+// swiftlint:disable:next type_body_length
 final class PTMCGlobalHotKeyManager {
     static let shared = PTMCGlobalHotKeyManager()
 
@@ -229,6 +232,7 @@ final class PTMCGlobalHotKeyManager {
         workspaceObservers.append(terminated)
     }
 
+    // swiftlint:disable:next cyclomatic_complexity
     private func handleApplicationLaunch(bundleIdentifier: String) async {
         refreshRegistration()
         guard !operationInProgress,

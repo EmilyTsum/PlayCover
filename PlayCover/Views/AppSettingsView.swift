@@ -756,7 +756,7 @@ private extension MetalCaptureAudioRecorder {
 }
 
 enum MetalCaptureInvocationSource: String {
-    case ui
+    case interface
     case hotkey
     case autostart
     case gameExit
@@ -1726,7 +1726,7 @@ struct MetalCaptureView: View {
 
     @MainActor
     private func startRecording() async {
-        let result = await PTMCGlobalHotKeyManager.shared.start(app: app, source: .ui)
+        let result = await PTMCGlobalHotKeyManager.shared.start(app: app, source: .interface)
         audioState = result.audioState
         if result.requested {
             commandSentAt = Date()
@@ -1736,7 +1736,7 @@ struct MetalCaptureView: View {
 
     @MainActor
     private func stopRecording() async {
-        let result = await PTMCGlobalHotKeyManager.shared.stop(app: app, source: .ui)
+        let result = await PTMCGlobalHotKeyManager.shared.stop(app: app, source: .interface)
         audioState = result.audioState
         if result.requested {
             commandSentAt = Date()

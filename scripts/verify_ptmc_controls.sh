@@ -25,7 +25,7 @@ grep -Fq 'var metalCaptureFeedbackSounds = true' "$settings_file"
 grep -Fq 'begin_record' "$view_file"
 grep -Fq 'end_record' "$view_file"
 grep -Fq '⌥⌘R toggles recording' "$view_file"
-grep -Fq 'PTMCGlobalHotKeyManager.shared.start(app: app, source: .ui)' "$view_file"
-grep -Fq 'PTMCGlobalHotKeyManager.shared.stop(app: app, source: .ui)' "$view_file"
+grep -Fq 'PTMCGlobalHotKeyManager.shared.start(app: app, source: .interface)' "$view_file"
+grep -Fq 'PTMCGlobalHotKeyManager.shared.stop(app: app, source: .interface)' "$view_file"
 
 echo 'PTMC host controls invariants: PASS'
