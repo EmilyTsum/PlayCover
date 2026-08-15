@@ -387,7 +387,6 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         max(0, pendingSamples.count - pendingHead)
     }
 
-    // swiftlint:disable:next function_body_length
     func start(bundleIdentifier: String) async throws {
         _ = await stop()
         droppedSamples = 0
@@ -497,9 +496,10 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         Log.shared.log("PTMC audio stream stopped: \(error.localizedDescription)", isError: true)
     }
+}
 
-
-    private func observeSourceTiming(_ sampleBuffer: CMSampleBuffer) {
+private extension MetalCaptureAudioRecorder {
+    func observeSourceTiming(_ sampleBuffer: CMSampleBuffer) {
         let timestamp = sampleBuffer.presentationTimeStamp
         let duration = sampleBuffer.duration
         if previousSampleEnd.isValid, timestamp.isValid {
@@ -517,7 +517,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         }
     }
 
-    private func prepareWriterIfNeeded(for sampleBuffer: CMSampleBuffer) -> Bool {
+    func prepareWriterIfNeeded(for sampleBuffer: CMSampleBuffer) -> Bool {
         if writer != nil { return true }
         guard let url = outputURL,
               let formatDescription = sampleBuffer.formatDescription else { return false }
@@ -570,7 +570,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         }
     }
 
-    private func drainPendingSamples(scheduleRetry: Bool = true) {
+    func drainPendingSamples(scheduleRetry: Bool = true) {
         guard let writer, let input = writerInput, writer.status == .writing else { return }
 
         while pendingHead < pendingSamples.count && input.isReadyForMoreMediaData {
@@ -595,7 +595,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         }
     }
 
-    private func scheduleDrain() {
+    func scheduleDrain() {
         guard !drainScheduled else { return }
         drainScheduled = true
         sampleQueue.asyncAfter(deadline: .now() + .nanoseconds(Int(drainRetryNanoseconds))) { [weak self] in
@@ -605,7 +605,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         }
     }
 
-    private func compactPendingSamples() {
+    func compactPendingSamples() {
         if pendingHead == pendingSamples.count {
             pendingSamples.removeAll(keepingCapacity: true)
             pendingHead = 0
@@ -615,7 +615,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         }
     }
 
-    private func finishWriterWhenDrained(
+    func finishWriterWhenDrained(
         deadlineNanoseconds: UInt64,
         continuation: CheckedContinuation<MetalCaptureAudioResult?, Never>
     ) {
@@ -635,7 +635,10 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
             pendingSamples.removeAll(keepingCapacity: true)
             pendingHead = 0
         }
+        finishWriter(continuation: continuation)
+    }
 
+    func finishWriter(continuation: CheckedContinuation<MetalCaptureAudioResult?, Never>) {
         guard let writer,
               let input = writerInput,
               let url = outputURL,
@@ -648,28 +651,19 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
 
         input.markAsFinished()
         let writerBox = MetalCaptureSendableBox(writer)
-        let resultDrops = droppedSamples
-        let resultPeakPending = peakPendingSamples
-        let resultBackpressure = backpressureEvents
-        let resultSourceGapCount = sourceGapCount
-        let resultSourceGapSeconds = sourceGapSeconds
-        let resultFirstHostTimeNs = firstHostTimeNs
-        let resultPassthroughPCM = passthroughPCM
+        let result = MetalCaptureAudioResult(
+            url: url,
+            firstHostTimeNs: firstHostTimeNs,
+            droppedSamples: droppedSamples,
+            peakPendingSamples: peakPendingSamples,
+            backpressureEvents: backpressureEvents,
+            sourceGapCount: sourceGapCount,
+            sourceGapSeconds: sourceGapSeconds,
+            passthroughPCM: passthroughPCM
+        )
         writer.finishWriting {
             let writer = writerBox.value
             let completed = writer.status == .completed
-            let result = completed
-                ? MetalCaptureAudioResult(
-                    url: url,
-                    firstHostTimeNs: resultFirstHostTimeNs,
-                    droppedSamples: resultDrops,
-                    peakPendingSamples: resultPeakPending,
-                    backpressureEvents: resultBackpressure,
-                    sourceGapCount: resultSourceGapCount,
-                    sourceGapSeconds: resultSourceGapSeconds,
-                    passthroughPCM: resultPassthroughPCM
-                )
-                : nil
             if !completed {
                 Log.shared.log(
                     "PTMC audio writer failed: \(writer.error?.localizedDescription ?? "unknown error")",
@@ -678,11 +672,11 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
                 try? FileManager.default.removeItem(at: url)
             }
             self.clearWriterState()
-            continuation.resume(returning: result)
+            continuation.resume(returning: completed ? result : nil)
         }
     }
 
-    private func clearWriterState() {
+    func clearWriterState() {
         writer = nil
         writerInput = nil
         outputURL = nil
