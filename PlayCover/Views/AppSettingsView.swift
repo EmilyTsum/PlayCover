@@ -89,7 +89,7 @@ struct AppSettingsView: View {
                     .disabled(!(hasPlayTools ?? true))
                 MetalCaptureView(settings: $viewModel.settings, app: viewModel.app)
                     .tabItem {
-                        Text("Metal Capture")
+                        Text("Capture")
                     }
                     .disabled(!(hasPlayTools ?? true))
                 BypassesView(settings: $viewModel.settings,
@@ -225,12 +225,26 @@ struct MetalCaptureView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Toggle("Enable pre-compositor Metal capture for this game",
-                       isOn: $settings.settings.metalCaptureEnabled)
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Pre-compositor Metal Capture")
+                        .font(.headline)
+                    Text("Capture the game's Metal output before WindowServer composition.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Toggle("Enabled", isOn: $settings.settings.metalCaptureEnabled)
+                    .toggleStyle(.switch)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
 
-                Group {
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
                     Toggle("Start recording automatically when the game launches",
                            isOn: $settings.settings.metalCaptureAutostart)
 
@@ -340,8 +354,8 @@ struct MetalCaptureView: View {
                         .foregroundStyle(.secondary)
                 }
                 .disabled(!settings.settings.metalCaptureEnabled)
+                .padding(14)
             }
-            .padding()
         }
     }
 
