@@ -304,10 +304,10 @@ enum MetalCaptureControl {
         let sourceDirectory = MetalCapturePaths.captureDirectory(for: bundleIdentifier)
         let destinationDirectory = MetalCapturePaths.exportDirectory(from: outputDirectory)
         Task.detached(priority: .utility) {
-            let fm = FileManager.default
+            let fileManager = FileManager.default
             do {
-                try fm.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
-                let files = try fm.contentsOfDirectory(
+                try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+                let files = try fileManager.contentsOfDirectory(
                     at: sourceDirectory,
                     includingPropertiesForKeys: nil,
                     options: [.skipsHiddenFiles]
@@ -316,7 +316,7 @@ enum MetalCaptureControl {
                     !source.lastPathComponent.hasSuffix(".partial.mov") {
                     var destination = destinationDirectory.appendingPathComponent(source.lastPathComponent)
                     var suffix = 1
-                    while fm.fileExists(atPath: destination.path) {
+                    while fileManager.fileExists(atPath: destination.path) {
                         let base = source.deletingPathExtension().lastPathComponent
                         destination = destinationDirectory
                             .appendingPathComponent("\(base)-\(suffix)")
@@ -324,11 +324,11 @@ enum MetalCaptureControl {
                         suffix += 1
                     }
                     do {
-                        try fm.moveItem(at: source, to: destination)
+                        try fileManager.moveItem(at: source, to: destination)
                     } catch {
                         do {
-                            try fm.copyItem(at: source, to: destination)
-                            try fm.removeItem(at: source)
+                            try fileManager.copyItem(at: source, to: destination)
+                            try fileManager.removeItem(at: source)
                         } catch {
                             Log.shared.log("PTMC export failed: \(error.localizedDescription)", isError: true)
                         }

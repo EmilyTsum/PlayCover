@@ -67,6 +67,7 @@ struct AppSettingsData: Codable {
     init() {}
 
     // handle old 2.x settings where PlayChain did not exist yet
+    // swiftlint:disable:next function_body_length
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         bundleIdentifier = try container.decodeIfPresent(String.self, forKey: .bundleIdentifier) ?? ""

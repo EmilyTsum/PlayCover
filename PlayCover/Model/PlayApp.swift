@@ -31,9 +31,9 @@ enum MetalCapturePaths {
     }
 
     static func prepare(for bundleIdentifier: String) {
-        let fm = FileManager.default
-        try? fm.createDirectory(at: captureDirectory(for: bundleIdentifier), withIntermediateDirectories: true)
-        try? fm.createDirectory(at: statusFile(for: bundleIdentifier).deletingLastPathComponent(),
+        let fileManager = FileManager.default
+        try? fileManager.createDirectory(at: captureDirectory(for: bundleIdentifier), withIntermediateDirectories: true)
+        try? fileManager.createDirectory(at: statusFile(for: bundleIdentifier).deletingLastPathComponent(),
                                 withIntermediateDirectories: true)
     }
 }
