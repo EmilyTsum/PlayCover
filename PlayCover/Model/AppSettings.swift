@@ -29,7 +29,7 @@ struct AppSettingsData: Codable {
     var playChain = true
     var playChainDebugging = false
     var inverseScreenValues = false
-    var metalHUD = false {
+    var metalHUD = true {
         didSet {
             do {
                 try Shell.setMetalHUD(bundleIdentifier, enabled: metalHUD)
@@ -96,7 +96,7 @@ struct AppSettingsData: Codable {
         playChain = try container.decodeIfPresent(Bool.self, forKey: .playChain) ?? true
         playChainDebugging = try container.decodeIfPresent(Bool.self, forKey: .playChainDebugging) ?? false
         inverseScreenValues = try container.decodeIfPresent(Bool.self, forKey: .inverseScreenValues) ?? false
-        metalHUD = try container.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? false
+        metalHUD = try container.decodeIfPresent(Bool.self, forKey: .metalHUD) ?? true
         windowFixMethod = try container.decodeIfPresent(Int.self, forKey: .windowFixMethod) ?? 0
         injectIntrospection = try container.decodeIfPresent(Bool.self, forKey: .injectIntrospection) ?? false
         rootWorkDir = try container.decodeIfPresent(Bool.self, forKey: .rootWorkDir) ?? true

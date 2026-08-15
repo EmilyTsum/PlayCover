@@ -53,6 +53,7 @@ jobs:
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_SUPPRESS_DISPLAY'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_SKIP_DISPLAY_PRESENT'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'samplingSkipPerSecond'
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'presentFPS'
 
       - name: Typecheck PTMC CLI
         run: |
@@ -92,6 +93,7 @@ jobs:
           strings "$FRAME/PlayTools" | grep -F 'PTMC_SUPPRESS_DISPLAY'
           strings "$FRAME/PlayTools" | grep -F 'PTMC_SKIP_DISPLAY_PRESENT'
           strings "$FRAME/PlayTools" | grep -F 'samplingSkipPerSecond'
+          strings "$FRAME/PlayTools" | grep -F 'presentFPS'
           xcrun vtool -show-build "$FRAME/PlayTools"
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict "$APP"

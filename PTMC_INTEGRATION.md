@@ -2,7 +2,7 @@
 
 This branch follows upstream PlayCover `develop` and bundles the public `EmilyTsum/PlayTools` `metal-capture` branch.
 
-Pinned PlayTools commit at this revision: `d11174ef62fb2651d47b62f2ab08cb3abf19b3fd`.
+Pinned PlayTools commit at this revision: `420f803dfc435f30e1a86e2b6fe138441d8ae6ed`.
 
 ## User-facing control
 
@@ -42,7 +42,7 @@ Game audio is captured separately by PlayCover with ScreenCaptureKit's applicati
 
 Frame-path hooks are installed only when Start Recording is requested. Direct `CAMetalDrawable.present*` is preferred on real-device Unity; command-buffer interception is only a fallback. On Stop, PTMC restores the original Metal method implementations, so the idle game returns to native dispatch with no per-frame PTMC wrapper. The UI reads the runtime heartbeat without continuously posting status notifications or rewriting configuration.
 
-The Metal Performance HUD launch environment explicitly enables the HUD menu bar (`MTL_HUD_DISABLE_MENU_BAR=0`) whenever the per-app Metal HUD toggle is enabled.
+The Metal Performance HUD is enabled by default for newly created app settings. Its launch environment explicitly keeps the HUD menu bar available (`MTL_HUD_DISABLE_MENU_BAR=0`) and enables the detailed avg/min/max value-range view (`MTL_HUD_SHOW_VALUE_RANGE=1`). Encoder timing is intentionally not forced because Apple documents additional HUD CPU overhead for that mode.
 
 ## CLI controller
 
@@ -73,3 +73,7 @@ The optional experimental display-suppression mode sets only the capture CAMetal
 The capture sampler now uses a deadline schedule with up to 1 ms of jitter tolerance. `samplingSkipped` is an intentional sampling count (for example, roughly 60 skips/s when a 120 Hz drawable is recorded at 60 fps), not an encoder failure. This also avoids the old edge case where slightly-early 60 Hz presents could be rejected every other frame.
 
 VideoToolbox submission runs on a dedicated user-initiated serial queue. Its callback releases the raw IOSurface capture slot immediately, before disk/writer work. Compressed AVAssetWriter work is isolated on a separate utility queue, so storage backpressure no longer holds raw capture slots or blocks further VideoToolbox submission. The default capture ring is now 3 slots; larger rings remain available for experimentation.
+
+### Metal HUD diagnostics default
+
+New per-app settings default Metal HUD to enabled. At launch PlayCover keeps the macOS Metal HUD menu bar available and requests Apple's detailed value-range view (`MTL_HUD_SHOW_VALUE_RANGE=1`, with the current range key also enabled). PTMC does not force encoder timing or per-frame HUD logging because Apple documents additional HUD CPU cost for encoder timing; those heavier diagnostics remain opt-in from the Metal HUD menu/configuration panel. Existing saved per-app HUD choices remain unchanged.

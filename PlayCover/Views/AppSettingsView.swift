@@ -247,6 +247,9 @@ struct MetalCaptureStatus {
     let unsupported: Int
     let skippedRate: Int
     let samplingSkipPerSecond: Double
+    let presentFPS: Double
+    let captureFPS: Double
+    let encodedFPS: Double
     let inFlight: Int
     let pendingWrites: Int
     let bufferCount: Int
@@ -297,6 +300,9 @@ struct MetalCaptureStatus {
             unsupported: integer("unsupported"),
             skippedRate: integer("samplingSkipped"),
             samplingSkipPerSecond: (values["samplingSkipPerSecond"] as? NSNumber)?.doubleValue ?? 0,
+            presentFPS: (values["presentFPS"] as? NSNumber)?.doubleValue ?? 0,
+            captureFPS: (values["captureFPS"] as? NSNumber)?.doubleValue ?? 0,
+            encodedFPS: (values["encodedFPS"] as? NSNumber)?.doubleValue ?? 0,
             inFlight: integer("inFlight"),
             pendingWrites: integer("pendingWrites"),
             bufferCount: integer("bufferCount"),
@@ -1094,9 +1100,15 @@ struct MetalCaptureView: View {
             if let status = captureStatus {
                 Text(
                     "hooks \(status.presentHookCount) • \(status.codec.uppercased()) • " +
-                    "presented \(status.presented) • " +
-                    "captured \(status.captured) • encoded \(status.encoded) • drops \(status.totalDrops) • " +
-                    "sampling skips \(status.skippedRate) (\(String(format: "%.1f", status.samplingSkipPerSecond))/s)"
+                    "present \(String(format: "%.1f", status.presentFPS)) fps • " +
+                    "capture \(String(format: "%.1f", status.captureFPS)) fps • " +
+                    "encode \(String(format: "%.1f", status.encodedFPS)) fps"
+                )
+                Text(
+                    "frames: presented \(status.presented) • captured \(status.captured) • " +
+                    "encoded \(status.encoded) • drops \(status.totalDrops) • " +
+                    "sampling skips total \(status.skippedRate) " +
+                    "(\(String(format: "%.1f", status.samplingSkipPerSecond))/s)"
                 )
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -1743,7 +1755,7 @@ struct MiscView: View {
     @Binding var hasAlias: Bool?
     @Binding var task: BlockingTask
     @AppStorage("settings.settings.discordActivity.enable") private var discordActivity = false
-    @AppStorage("settings.settings.metalHUD") private var metalHUD = false
+    @AppStorage("settings.settings.metalHUD") private var metalHUD = true
     @AppStorage("settings.openWithLLDB") private var openWithLLDB = false
     @AppStorage("settings.openLLDBWithTerminal") private var openLLDBWithTerminal = false
     @State var showPopover = false
@@ -1834,7 +1846,11 @@ struct MiscView: View {
                     HStack {
                         Toggle("settings.toggle.hud", isOn: $settings.settings.metalHUD)
                             .disabled(!isVenturaGreater())
-                            .help(!isVenturaGreater() ? "settings.unavailable.hud" : "")
+                            .help(
+                                !isVenturaGreater()
+                                    ? "settings.unavailable.hud"
+                                    : "Starts Metal HUD in detailed avg/min/max mode and keeps its menu bar available."
+                            )
                         Spacer()
                         HStack {
                             Text("settings.text.debugger")

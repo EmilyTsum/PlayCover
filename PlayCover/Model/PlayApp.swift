@@ -343,11 +343,13 @@ extension PlayApp {
             "PTMC_STATUS_FILE": statusFile.path
         ]
         if capture.metalHUD {
-            // Apple documents that an enabled Metal HUD adds its own "Metal HUD" menu to the
-            // macOS menu bar unless MTL_HUD_DISABLE_MENU_BAR is set. Be explicit because wrapped
-            // iOS apps don't inherit a normal shell/Xcode environment reliably.
+            // Keep the Metal HUD menu bar available and start in Apple's detailed value-range view.
+            // Do not force encoder timing or per-frame logging: Apple documents extra HUD CPU cost
+            // for encoder timing, which would distort PTMC frame-pacing measurements.
             environment["MTL_HUD_ENABLED"] = "1"
             environment["MTL_HUD_DISABLE_MENU_BAR"] = "0"
+            environment["MTL_HUD_SHOW_VALUE_RANGE"] = "1"
+            environment["MTL_HUD_SHOW_METRICS_RANGE"] = "1"
         }
         return environment
     }

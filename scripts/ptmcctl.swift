@@ -89,6 +89,12 @@ private func status(_ bundle: String, compact: Bool = false) -> [String: Any] {
     print("encoded:      \(int(values, "encoded"))")
     print("sampling skipped: \(int(values, "samplingSkipped")) total " +
           "(\(String(format: "%.1f", (values["samplingSkipPerSecond"] as? NSNumber)?.doubleValue ?? 0))/s)")
+    let presentFPS = (values["presentFPS"] as? NSNumber)?.doubleValue ?? 0
+    let captureFPS = (values["captureFPS"] as? NSNumber)?.doubleValue ?? 0
+    let encodedFPS = (values["encodedFPS"] as? NSNumber)?.doubleValue ?? 0
+    print("live rates:   present \(String(format: "%.1f", presentFPS)) fps, " +
+          "capture \(String(format: "%.1f", captureFPS)) fps, " +
+          "encode \(String(format: "%.1f", encodedFPS)) fps")
     print("pipeline:     inFlight=\(int(values, "inFlight"))/\(int(values, "bufferCount")) pendingWrites=\(int(values, "pendingWrites"))")
     print("drops:        \(drops) [pool \(int(values, "droppedPool")), encoder \(int(values, "droppedEncoder")), late \(int(values, "droppedLate")), unsupported \(int(values, "unsupported"))]")
     print("EDR:          \(int(values, "edr"))")
