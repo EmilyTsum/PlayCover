@@ -60,6 +60,7 @@ struct AppSettingsData: Codable {
     var metalCaptureBuffers = 6
     var metalCaptureLogInterval = 1.0
     var metalCaptureDisableDisplaySync = false
+    var metalCaptureForceSDRDisplay = true
     var metalCaptureSpoofMaxFPS = 0
     var metalCaptureOutputDirectory = ""
 
@@ -113,6 +114,8 @@ struct AppSettingsData: Codable {
         metalCaptureLogInterval = try container.decodeIfPresent(Double.self, forKey: .metalCaptureLogInterval) ?? 1.0
         metalCaptureDisableDisplaySync = try container.decodeIfPresent(
             Bool.self, forKey: .metalCaptureDisableDisplaySync) ?? false
+        metalCaptureForceSDRDisplay = try container.decodeIfPresent(
+            Bool.self, forKey: .metalCaptureForceSDRDisplay) ?? true
         metalCaptureSpoofMaxFPS = try container.decodeIfPresent(Int.self, forKey: .metalCaptureSpoofMaxFPS) ?? 0
         metalCaptureOutputDirectory = try container.decodeIfPresent(
             String.self, forKey: .metalCaptureOutputDirectory) ?? ""

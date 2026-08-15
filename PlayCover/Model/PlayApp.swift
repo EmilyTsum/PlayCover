@@ -7,6 +7,37 @@ import Cocoa
 import Foundation
 import IOKit.pwr_mgt
 
+enum MetalCapturePaths {
+    static func captureDirectory(for bundleIdentifier: String) -> URL {
+        PlayTools.playCoverContainer
+            .appendingPathComponent("Captures")
+            .appendingPathComponent(bundleIdentifier)
+    }
+
+    static func statusFile(for bundleIdentifier: String) -> URL {
+        PlayTools.playCoverContainer
+            .appendingPathComponent("PTMC Status")
+            .appendingPathComponent(bundleIdentifier)
+            .appendingPathExtension("plist")
+    }
+
+    static func exportDirectory(from rawValue: String) -> URL {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Movies")
+        }
+        let expanded = NSString(string: trimmed).expandingTildeInPath
+        return URL(fileURLWithPath: expanded, isDirectory: true)
+    }
+
+    static func prepare(for bundleIdentifier: String) {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: captureDirectory(for: bundleIdentifier), withIntermediateDirectories: true)
+        try? fm.createDirectory(at: statusFile(for: bundleIdentifier).deletingLastPathComponent(),
+                                withIntermediateDirectories: true)
+    }
+}
+
 // swiftlint:disable file_length
 class PlayApp: BaseApp {
     // MARK: - Static
@@ -222,35 +253,34 @@ extension PlayApp {
 
     private func metalCaptureLaunchEnvironment() -> [String: String] {
         let capture = settings.settings
-        guard capture.metalCaptureEnabled else {
-            return [
-                "PTMC_ENABLE": "0",
-                "PTMC_AUTOSTART": "0"
-            ]
-        }
-
         let fps = min(max(capture.metalCaptureFPS, 1), 240)
         let bitrateMbps = min(max(capture.metalCaptureBitrateMbps, 1), 1000)
         let buffers = min(max(capture.metalCaptureBuffers, 3), 16)
         let logInterval = min(max(capture.metalCaptureLogInterval, 0.25), 60.0)
         let spoofMaxFPS = min(max(capture.metalCaptureSpoofMaxFPS, 0), 240)
 
-        var environment = [
-            "PTMC_ENABLE": "1",
-            "PTMC_AUTOSTART": capture.metalCaptureAutostart ? "1" : "0",
+        MetalCapturePaths.prepare(for: info.bundleIdentifier)
+        let captureDirectory = MetalCapturePaths.captureDirectory(for: info.bundleIdentifier)
+        let statusFile = MetalCapturePaths.statusFile(for: info.bundleIdentifier)
+
+        return [
+            // Standby keeps the hooks/notification receiver available with negligible per-frame
+            // overhead, so enabling capture while a game is already running can work immediately.
+            "PTMC_STANDBY": "1",
+            "PTMC_ENABLE": capture.metalCaptureEnabled ? "1" : "0",
+            "PTMC_AUTOSTART": capture.metalCaptureEnabled && capture.metalCaptureAutostart ? "1" : "0",
             "PTMC_FPS": String(fps),
             "PTMC_BITRATE": String(bitrateMbps * 1_000_000),
             "PTMC_BUFFERS": String(buffers),
             "PTMC_LOG_INTERVAL": String(logInterval),
             "PTMC_DISABLE_DISPLAY_SYNC": capture.metalCaptureDisableDisplaySync ? "1" : "0",
-            "PTMC_SPOOF_MAX_FPS": String(spoofMaxFPS)
+            "PTMC_FORCE_SDR_DISPLAY": capture.metalCaptureForceSDRDisplay ? "1" : "0",
+            "PTMC_SPOOF_MAX_FPS": String(spoofMaxFPS),
+            // The game process is sandboxed. Always stage capture files in PlayCover's own
+            // container, which is explicitly allowed by the generated sandbox profile.
+            "PTMC_OUTPUT_DIR": captureDirectory.path,
+            "PTMC_STATUS_FILE": statusFile.path
         ]
-
-        let outputDirectory = capture.metalCaptureOutputDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !outputDirectory.isEmpty {
-            environment["PTMC_OUTPUT_DIR"] = NSString(string: outputDirectory).expandingTildeInPath
-        }
-        return environment
     }
 }
 

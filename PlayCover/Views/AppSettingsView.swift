@@ -36,16 +36,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         }
     }
 
-    var systemImage: String {
-        switch self {
-        case .keymapping: return "keyboard"
-        case .graphics: return "display"
-        case .capture: return "record.circle"
-        case .bypasses: return "shield"
-        case .misc: return "gearshape"
-        case .info: return "info.circle"
-        }
-    }
 }
 
 struct AppSettingsView: View {
@@ -113,7 +103,7 @@ struct AppSettingsView: View {
 
             Picker("Settings section", selection: $selectedSection) {
                 ForEach(SettingsSection.allCases) { section in
-                    Label(section.title, systemImage: section.systemImage)
+                    Text(section.title)
                         .tag(section)
                 }
             }
@@ -184,7 +174,7 @@ struct AppSettingsView: View {
             hasAlias = viewModel.app.hasAlias()
         }
         .padding()
-        .frame(width: 600, height: 400)
+        .frame(width: 720, height: 560)
     }
 }
 
@@ -235,9 +225,64 @@ private enum MetalCaptureCommand: String {
     case status
 }
 
+struct MetalCaptureStatus {
+    let phase: String
+    let message: String
+    let outputPath: String?
+    let drawableWidth: Int
+    let drawableHeight: Int
+    let presented: Int
+    let captured: Int
+    let encoded: Int
+    let droppedPool: Int
+    let droppedEncoder: Int
+    let droppedLate: Int
+    let unsupported: Int
+    let displaySync: Int
+    let framebufferOnly: Int
+    let edr: Int
+
+    static func read(bundleIdentifier: String) -> MetalCaptureStatus? {
+        let url = MetalCapturePaths.statusFile(for: bundleIdentifier)
+        guard let data = try? Data(contentsOf: url),
+              let object = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
+              let values = object as? [String: Any] else { return nil }
+
+        func integer(_ key: String) -> Int {
+            (values[key] as? NSNumber)?.intValue ?? 0
+        }
+
+        return MetalCaptureStatus(
+            phase: values["phase"] as? String ?? "unknown",
+            message: values["message"] as? String ?? "",
+            outputPath: values["outputPath"] as? String,
+            drawableWidth: integer("drawableWidth"),
+            drawableHeight: integer("drawableHeight"),
+            presented: integer("presented"),
+            captured: integer("captured"),
+            encoded: integer("encoded"),
+            droppedPool: integer("droppedPool"),
+            droppedEncoder: integer("droppedEncoder"),
+            droppedLate: integer("droppedLate"),
+            unsupported: integer("unsupported"),
+            displaySync: integer("displaySync"),
+            framebufferOnly: integer("framebufferOnly"),
+            edr: integer("edr")
+        )
+    }
+}
+
+extension MetalCaptureStatus {
+    var totalDrops: Int { droppedPool + droppedEncoder + droppedLate + unsupported }
+    var requestedMetricsVisible: Bool { presented > 0 || captured > 0 || encoded > 0 || totalDrops > 0 }
+}
+
 enum MetalCaptureControl {
     static func post(_ command: String, bundleIdentifier: String) {
         guard let typedCommand = MetalCaptureCommand(rawValue: command) else { return }
+        if typedCommand == .start {
+            try? FileManager.default.removeItem(at: MetalCapturePaths.statusFile(for: bundleIdentifier))
+        }
         let rawName = "io.playcover.ptmc.\(typedCommand.rawValue).\(bundleIdentifier)" as CFString
         let name = CFNotificationName(rawValue: rawName)
         CFNotificationCenterPostNotification(
@@ -245,7 +290,70 @@ enum MetalCaptureControl {
             name,
             nil,
             nil,
-            true)
+            true
+        )
+    }
+
+    static func revealCaptures(bundleIdentifier: String) {
+        let directory = MetalCapturePaths.captureDirectory(for: bundleIdentifier)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(directory)
+    }
+
+    static func exportCompletedCaptures(bundleIdentifier: String, outputDirectory: String) {
+        let sourceDirectory = MetalCapturePaths.captureDirectory(for: bundleIdentifier)
+        let destinationDirectory = MetalCapturePaths.exportDirectory(from: outputDirectory)
+        Task.detached(priority: .utility) {
+            let fm = FileManager.default
+            do {
+                try fm.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+                let files = try fm.contentsOfDirectory(
+                    at: sourceDirectory,
+                    includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles]
+                )
+                for source in files where source.pathExtension.lowercased() == "mov" &&
+                    !source.lastPathComponent.hasSuffix(".partial.mov") {
+                    var destination = destinationDirectory.appendingPathComponent(source.lastPathComponent)
+                    var suffix = 1
+                    while fm.fileExists(atPath: destination.path) {
+                        let base = source.deletingPathExtension().lastPathComponent
+                        destination = destinationDirectory
+                            .appendingPathComponent("\(base)-\(suffix)")
+                            .appendingPathExtension("mov")
+                        suffix += 1
+                    }
+                    do {
+                        try fm.moveItem(at: source, to: destination)
+                    } catch {
+                        do {
+                            try fm.copyItem(at: source, to: destination)
+                            try fm.removeItem(at: source)
+                        } catch {
+                            Log.shared.log("PTMC export failed: \(error.localizedDescription)", isError: true)
+                        }
+                    }
+                }
+            } catch {
+                Log.shared.log("PTMC export scan failed: \(error.localizedDescription)", isError: true)
+            }
+        }
+    }
+
+    static func exportAfterFinalization(bundleIdentifier: String, outputDirectory: String) {
+        Task.detached(priority: .utility) {
+            for _ in 0..<80 {
+                if let status = MetalCaptureStatus.read(bundleIdentifier: bundleIdentifier),
+                   status.phase == "finalized" {
+                    exportCompletedCaptures(
+                        bundleIdentifier: bundleIdentifier,
+                        outputDirectory: outputDirectory
+                    )
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
     }
 }
 
@@ -253,11 +361,11 @@ struct MetalCaptureView: View {
     @ObservedObject var settings: AppSettings
     let app: PlayApp
     let hasPlayTools: Bool?
+    @State private var captureStatus: MetalCaptureStatus?
 
     private var defaultOutputDescription: String {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Movies")
-            .appendingPathComponent("PlayTools-Capture-<timestamp>.mov")
             .path
     }
 
@@ -291,6 +399,10 @@ struct MetalCaptureView: View {
                 .padding(.horizontal, 14)
                 .padding(.bottom, 10)
             }
+
+            captureStatusView
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
 
             Divider()
 
@@ -345,6 +457,10 @@ struct MetalCaptureView: View {
                            isOn: $settings.settings.metalCaptureDisableDisplaySync)
                         .help("Optional frame-pacing diagnostic. Leave off unless the game presents at only 60 fps.")
 
+                    Toggle("Force SDR presentation while capturing",
+                           isOn: $settings.settings.metalCaptureForceSDRDisplay)
+                        .help("Prevents EDR/HDR presentation while PTMC is reading the drawable.")
+
                     HStack {
                         Text("Spoof UIScreen maximum FPS")
                         Spacer()
@@ -363,7 +479,7 @@ struct MetalCaptureView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Output directory")
+                        Text("Export destination")
                         HStack {
                             TextField("Default: ~/Movies", text: $settings.settings.metalCaptureOutputDirectory)
                             Button("Choose…") {
@@ -373,9 +489,13 @@ struct MetalCaptureView: View {
                                 settings.settings.metalCaptureOutputDirectory = ""
                             }
                         }
-                        Text(settings.settings.metalCaptureOutputDirectory.isEmpty
-                             ? "Default: \(defaultOutputDescription)"
-                             : "A timestamped .mov file is created in this directory for every recording.")
+                        Text("Finalized recordings are staged inside PlayCover's container first, then exported to " +
+                             (settings.settings.metalCaptureOutputDirectory.isEmpty
+                              ? defaultOutputDescription
+                              : settings.settings.metalCaptureOutputDirectory) + ".")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("This avoids the game sandbox blocking writes to Movies or another user-selected folder.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -390,23 +510,82 @@ struct MetalCaptureView: View {
 
                         Button("Stop Recording") {
                             MetalCaptureControl.post("stop", bundleIdentifier: app.info.bundleIdentifier)
+                            MetalCaptureControl.exportAfterFinalization(
+                                bundleIdentifier: app.info.bundleIdentifier,
+                                outputDirectory: settings.settings.metalCaptureOutputDirectory
+                            )
                         }
 
-                        Button("Log Status") {
+                        Button("Refresh Status") {
                             MetalCaptureControl.post("status", bundleIdentifier: app.info.bundleIdentifier)
+                            captureStatus = MetalCaptureStatus.read(bundleIdentifier: app.info.bundleIdentifier)
                         }
                         Spacer()
                     }
 
-                    Text("Launch-time settings apply the next time this game starts. " +
-                         "Start/Stop/Status target only this game's bundle identifier and work immediately " +
-                         "while a PTMC-enabled game is running.")
+                    HStack {
+                        Button("Open Capture Staging") {
+                            MetalCaptureControl.revealCaptures(bundleIdentifier: app.info.bundleIdentifier)
+                        }
+                        Button("Export Completed") {
+                            MetalCaptureControl.exportCompletedCaptures(
+                                bundleIdentifier: app.info.bundleIdentifier,
+                                outputDirectory: settings.settings.metalCaptureOutputDirectory
+                            )
+                        }
+                        Spacer()
+                    }
+
+                    Text("Start/Stop/Status target only this game's bundle identifier. " +
+                         "Capture hooks stay dormant in standby, so Start can also work after enabling capture " +
+                         "while a game from this PTMC build is already running.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 .disabled(!settings.settings.metalCaptureEnabled)
                 .padding(14)
             }
+        }
+        .task(id: app.info.bundleIdentifier) {
+            MetalCaptureControl.exportCompletedCaptures(
+                bundleIdentifier: app.info.bundleIdentifier,
+                outputDirectory: settings.settings.metalCaptureOutputDirectory
+            )
+            while !Task.isCancelled {
+                captureStatus = MetalCaptureStatus.read(bundleIdentifier: app.info.bundleIdentifier)
+                try? await Task.sleep(nanoseconds: 750_000_000)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var captureStatusView: some View {
+        if let status = captureStatus {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: status.phase == "error" ? "exclamationmark.triangle.fill" : "waveform.path.ecg")
+                    Text("Runtime: \(status.phase)")
+                        .font(.caption.bold())
+                    Spacer()
+                    if status.drawableWidth > 0 && status.drawableHeight > 0 {
+                        Text("\(status.drawableWidth)×\(status.drawableHeight)")
+                            .font(.caption.monospacedDigit())
+                    }
+                }
+                Text(status.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if status.requestedMetricsVisible {
+                    Text("presented \(status.presented) • captured \(status.captured) • encoded \(status.encoded) • " +
+                         "drops \(status.totalDrops) • EDR \(status.edr == 1 ? "on" : "off")")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            Text("Runtime status will appear after the PTMC-enabled game launches.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
