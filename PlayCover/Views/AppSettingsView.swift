@@ -246,7 +246,8 @@ struct MetalCaptureView: View {
             if hasPlayTools == false {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                    Text("PlayTools was not detected in this game's executable. Capture settings can still be configured, " +
+                    Text("PlayTools was not detected in this game's executable. " +
+                         "Capture settings can still be configured, " +
                          "but recording requires PlayTools to be installed for the game.")
                         .font(.caption)
                     Spacer()
