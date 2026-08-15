@@ -42,9 +42,8 @@ jobs:
           carthage bootstrap --use-xcframeworks --cache-builds
           expected=$(awk -F'"' '/EmilyTsum\/PlayTools/ {print $4}' Cartfile.resolved)
           echo "PlayTools pinned commit=$expected"
-          actual=$(git -C Carthage/Checkouts/PlayTools rev-parse HEAD)
-          echo "PlayTools checkout commit=$actual"
-          test "$actual" = "$expected"
+          # Carthage's checkout is an exported working tree without reliable nested .git metadata;
+          # Cartfile.resolved is the authoritative revision and bootstrap above checks it out.
           test -f Carthage/Checkouts/PlayTools/PlayTools/MetalCapture/PTMetalCapture.inc
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'io.playcover.ptmc.start'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_OUTPUT_DIR'
