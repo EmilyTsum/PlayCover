@@ -7,6 +7,7 @@ import Cocoa
 import Foundation
 import IOKit.pwr_mgt
 
+// swiftlint:disable file_length
 class PlayApp: BaseApp {
     // MARK: - Static
     public static let bundleIDCacheURL = PlayTools.playCoverContainer.appendingPathComponent("CACHE")
