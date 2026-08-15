@@ -1125,9 +1125,11 @@ struct MetalCaptureView: View {
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
                 if status.ownedCaptureCommandBuffers > 0 {
+                    let gpuMilliseconds = Double(status.lastOwnedCaptureGPUTimeUs) / 1000.0
+                    let completionMilliseconds = Double(status.lastOwnedCaptureCompletionUs) / 1000.0
                     Text(
-                        "capture command: GPU \(String(format: "%.2f", Double(status.lastOwnedCaptureGPUTimeUs) / 1000.0)) ms • " +
-                        "completion \(String(format: "%.2f", Double(status.lastOwnedCaptureCompletionUs) / 1000.0)) ms • " +
+                        "capture command: GPU \(String(format: "%.2f", gpuMilliseconds)) ms • " +
+                        "completion \(String(format: "%.2f", completionMilliseconds)) ms • " +
                         "owned CB \(status.ownedCaptureCommandBuffers)"
                     )
                     .font(.caption2.monospacedDigit())
