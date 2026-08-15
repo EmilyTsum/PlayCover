@@ -1125,6 +1125,15 @@ struct MetalCaptureView: View {
                 )
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
+                if status.ownedCaptureCommandBuffers > 0 {
+                    Text(
+                        "capture command: GPU \(String(format: "%.2f", Double(status.lastOwnedCaptureGPUTimeUs) / 1000.0)) ms • " +
+                        "completion \(String(format: "%.2f", Double(status.lastOwnedCaptureCompletionUs) / 1000.0)) ms • " +
+                        "owned CB \(status.ownedCaptureCommandBuffers)"
+                    )
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
                 Text(
                     "GPU path: \(status.memoryPath) • display " +
                     (status.displayPresentSkipped ? "present bypass" :
