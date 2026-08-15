@@ -539,9 +539,9 @@ private extension MetalCaptureAudioRecorder {
         try? sampleBuffer.withAudioBufferList { audioBufferList, _ in
             guard let formatDescription = sampleBuffer.formatDescription,
                   let description = formatDescription.audioStreamBasicDescription,
-                  description.mSampleRate > 0,
-                  let format = AVAudioFormat(cmAudioFormatDescription: formatDescription),
-                  format.commonFormat == .pcmFormatFloat32,
+                  description.mSampleRate > 0 else { return }
+            let format = AVAudioFormat(cmAudioFormatDescription: formatDescription)
+            guard format.commonFormat == .pcmFormatFloat32,
                   let pcmBuffer = AVAudioPCMBuffer(
                     pcmFormat: format,
                     bufferListNoCopy: audioBufferList.unsafePointer
