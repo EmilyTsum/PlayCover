@@ -73,7 +73,7 @@ private func status(_ bundle: String, compact: Bool = false) -> [String: Any] {
         print(
             "phase=\(string(values, "phase")) codec=\(string(values, "codec")) " +
             "presented=\(int(values, "presented")) captured=\(int(values, "captured")) " +
-            "encoded=\(int(values, "encoded")) drops=\(drops) rateSkip=\(int(values, "skippedRate"))"
+            "encoded=\(int(values, "encoded")) drops=\(drops) samplingSkip=\(int(values, "samplingSkipped"))"
         )
         return values
     }
@@ -87,7 +87,9 @@ private func status(_ bundle: String, compact: Bool = false) -> [String: Any] {
     print("presented:    \(int(values, "presented"))")
     print("captured:     \(int(values, "captured"))")
     print("encoded:      \(int(values, "encoded"))")
-    print("rate skipped: \(int(values, "skippedRate"))")
+    print("sampling skipped: \(int(values, "samplingSkipped")) total " +
+          "(\(String(format: "%.1f", (values["samplingSkipPerSecond"] as? NSNumber)?.doubleValue ?? 0))/s)")
+    print("pipeline:     inFlight=\(int(values, "inFlight"))/\(int(values, "bufferCount")) pendingWrites=\(int(values, "pendingWrites"))")
     print("drops:        \(drops) [pool \(int(values, "droppedPool")), encoder \(int(values, "droppedEncoder")), late \(int(values, "droppedLate")), unsupported \(int(values, "unsupported"))]")
     print("EDR:          \(int(values, "edr"))")
     print("colorspace:   \(string(values, "colorSpace"))")
@@ -184,6 +186,12 @@ private func configure(_ bundle: String, options: ArraySlice<String>) throws {
             }
             runtime["suppressDisplayOutput"] = flag
             app["metalCaptureSuppressDisplayOutput"] = flag
+        case "skipPresent":
+            guard let flag = boolValue(value) else {
+                throw PTMCCLIError.message("skipPresent must be true/false")
+            }
+            runtime["skipDisplayPresent"] = flag
+            app["metalCaptureSkipDisplayPresent"] = flag
         default:
             throw PTMCCLIError.message("unknown config key: \(key)")
         }
@@ -253,7 +261,7 @@ private func usage() -> Never {
       record  <bundle-id> [seconds]
       config  <bundle-id> [fps=120 bitrateMbps=120 buffers=6 codec=hevc]
                           [resolution=source|2160p|1440p|1080p|720p|custom width=1920 height=1080]
-                          [forceSDR=true disableSync=false suppressDisplay=false]
+                          [forceSDR=true disableSync=false suppressDisplay=false skipPresent=false]
       inspect <bundle-id>
 
     `record` controls the in-game PTMC video runtime. Game-audio capture is owned by the PlayCover UI

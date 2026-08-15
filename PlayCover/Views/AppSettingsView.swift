@@ -246,6 +246,10 @@ struct MetalCaptureStatus {
     let droppedLate: Int
     let unsupported: Int
     let skippedRate: Int
+    let samplingSkipPerSecond: Double
+    let inFlight: Int
+    let pendingWrites: Int
+    let bufferCount: Int
     let codec: String
     let firstVideoHostTimeNs: UInt64
     let displaySync: Int
@@ -254,6 +258,11 @@ struct MetalCaptureStatus {
     let presentHookCount: Int
     let captureEnabled: Bool
     let displaySuppressed: Bool
+    let displayPresentSkipped: Bool
+    let skippedPresents: Int
+    let ownedCaptureCommandBuffers: Int
+    let lastOwnedCaptureGPUTimeUs: Int
+    let lastOwnedCaptureCompletionUs: Int
     let captureResolutionMode: String
     let memoryPath: String
     let colorSpace: String
@@ -286,7 +295,11 @@ struct MetalCaptureStatus {
             droppedEncoder: integer("droppedEncoder"),
             droppedLate: integer("droppedLate"),
             unsupported: integer("unsupported"),
-            skippedRate: integer("skippedRate"),
+            skippedRate: integer("samplingSkipped"),
+            samplingSkipPerSecond: (values["samplingSkipPerSecond"] as? NSNumber)?.doubleValue ?? 0,
+            inFlight: integer("inFlight"),
+            pendingWrites: integer("pendingWrites"),
+            bufferCount: integer("bufferCount"),
             codec: values["codec"] as? String ?? "hevc",
             firstVideoHostTimeNs: (values["firstVideoHostTimeNs"] as? NSNumber)?.uint64Value ?? 0,
             displaySync: integer("displaySync"),
@@ -295,6 +308,11 @@ struct MetalCaptureStatus {
             presentHookCount: integer("presentHookCount"),
             captureEnabled: (values["captureEnabled"] as? NSNumber)?.boolValue ?? false,
             displaySuppressed: (values["displaySuppressed"] as? NSNumber)?.boolValue ?? false,
+            displayPresentSkipped: (values["displayPresentSkipped"] as? NSNumber)?.boolValue ?? false,
+            skippedPresents: integer("skippedPresents"),
+            ownedCaptureCommandBuffers: integer("ownedCaptureCommandBuffers"),
+            lastOwnedCaptureGPUTimeUs: integer("lastOwnedCaptureGPUTimeUs"),
+            lastOwnedCaptureCompletionUs: integer("lastOwnedCaptureCompletionUs"),
             captureResolutionMode: values["captureResolutionMode"] as? String ?? "source",
             memoryPath: values["memoryPath"] as? String ?? "unknown",
             colorSpace: values["colorSpace"] as? String ?? "unknown"
@@ -847,7 +865,7 @@ struct MetalCaptureView: View {
                     }
 
                     HStack {
-                        Text("NV12 buffer slots")
+                        Text("Capture buffer slots")
                         Spacer()
                         Stepper(value: $settings.settings.metalCaptureBuffers, in: 3...16) {
                             Text("\(settings.settings.metalCaptureBuffers)")
@@ -855,6 +873,12 @@ struct MetalCaptureView: View {
                                 .frame(width: 40, alignment: .trailing)
                         }
                     }
+                    Text(
+                        "3 is recommended for low-latency capture. More slots allow a deeper raw-frame queue and can " +
+                        "increase GPU/unified-memory pressure at 4K even though encoding itself is asynchronous."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                     HStack {
                         Text("Status log interval")
@@ -878,6 +902,15 @@ struct MetalCaptureView: View {
                             "Makes the capture CAMetalLayer transparent while still presenting drawables so they " +
                             "recycle normally. This may let WindowServer cull visible composition work. The original " +
                             "opacity is restored on Stop."
+                        )
+
+
+                    Toggle("Skip display present while recording (unsafe experiment)",
+                           isOn: $settings.settings.metalCaptureSkipDisplayPresent)
+                        .help(
+                            "Stops forwarding CAMetalDrawable present calls after PTMC captures the frame. This can " +
+                            "remove compositor work but may starve the drawable pool or freeze some games. Prefer " +
+                            "Suppress on-screen output first. Automatically restores normal present on Stop."
                         )
 
                     Toggle("Force SDR presentation for capture",
@@ -1019,6 +1052,9 @@ struct MetalCaptureView: View {
         .onChange(of: settings.settings.metalCaptureSuppressDisplayOutput) { _ in
             syncRuntimeConfiguration(command: "status")
         }
+        .onChange(of: settings.settings.metalCaptureSkipDisplayPresent) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
         .onChange(of: settings.settings.metalCaptureFPS) { _ in
             syncRuntimeConfiguration(command: "status")
         }
@@ -1062,7 +1098,7 @@ struct MetalCaptureView: View {
                     "hooks \(status.presentHookCount) • \(status.codec.uppercased()) • " +
                     "presented \(status.presented) • " +
                     "captured \(status.captured) • encoded \(status.encoded) • drops \(status.totalDrops) • " +
-                    "rate-skip \(status.skippedRate)"
+                    "sampling skips \(status.skippedRate) (\(String(format: "%.1f", status.samplingSkipPerSecond))/s)"
                 )
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -1085,8 +1121,15 @@ struct MetalCaptureView: View {
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
                 Text(
+                    "pipeline: raw in-flight \(status.inFlight)/\(status.bufferCount) • compressed pending " +
+                    "\(status.pendingWrites) • present skips \(status.skippedPresents)"
+                )
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                Text(
                     "GPU path: \(status.memoryPath) • display " +
-                    (status.displaySuppressed ? "suppressed" : "normal")
+                    (status.displayPresentSkipped ? "present bypass" :
+                     (status.displaySuppressed ? "transparent" : "normal"))
                 )
                 .font(.caption2)
                 .foregroundStyle(.secondary)

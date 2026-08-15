@@ -2,7 +2,7 @@
 
 This branch follows upstream PlayCover `develop` and bundles the public `EmilyTsum/PlayTools` `metal-capture` branch.
 
-Pinned PlayTools commit at this revision: `0c2dec2e4a96f092d3439b1c2abf18cb04925015`.
+Pinned PlayTools commit at this revision: `a93adc954527eade3e03404e068769429a647067`.
 
 ## User-facing control
 
@@ -67,3 +67,9 @@ The optimized capture path uses a 2×2 HEVC BGRA→NV12 compute kernel, a direct
 Capture resolution is independent from the game drawable. `source`, 2160p, 1440p, 1080p, 720p, and custom maximum-size modes preserve aspect ratio and never upscale. HEVC downscales while converting BGRA directly to the IOSurface-backed NV12 VideoToolbox input; ProRes downscales directly into an IOSurface-backed BGRA input. There is no CPU frame readback or intermediate full-frame CPU copy.
 
 The optional experimental display-suppression mode sets only the capture CAMetalLayer opacity to zero while continuing to call the original present method so drawable recycling remains intact; Stop restores the original opacity and other presentation state.
+
+### 4K frame-pacing / asynchronous encoder changes
+
+The capture sampler now uses a deadline schedule with up to 1 ms of jitter tolerance. `samplingSkipped` is an intentional sampling count (for example, roughly 60 skips/s when a 120 Hz drawable is recorded at 60 fps), not an encoder failure. This also avoids the old edge case where slightly-early 60 Hz presents could be rejected every other frame.
+
+VideoToolbox submission runs on a dedicated user-initiated serial queue. Its callback releases the raw IOSurface capture slot immediately, before disk/writer work. Compressed AVAssetWriter work is isolated on a separate utility queue, so storage backpressure no longer holds raw capture slots or blocks further VideoToolbox submission. The default capture ring is now 3 slots; larger rings remain available for experimentation.

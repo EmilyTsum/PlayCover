@@ -61,9 +61,10 @@ struct AppSettingsData: Codable {
     var metalCaptureCustomWidth = 1920
     var metalCaptureCustomHeight = 1080
     var metalCaptureSuppressDisplayOutput = false
+    var metalCaptureSkipDisplayPresent = false
     var metalCaptureFPS = 120
     var metalCaptureBitrateMbps = 120
-    var metalCaptureBuffers = 6
+    var metalCaptureBuffers = 3
     var metalCaptureLogInterval = 1.0
     var metalCaptureDisableDisplaySync = false
     var metalCaptureForceSDRDisplay = true
@@ -125,9 +126,11 @@ struct AppSettingsData: Codable {
             Int.self, forKey: .metalCaptureCustomHeight) ?? 1080
         metalCaptureSuppressDisplayOutput = try container.decodeIfPresent(
             Bool.self, forKey: .metalCaptureSuppressDisplayOutput) ?? false
+        metalCaptureSkipDisplayPresent = try container.decodeIfPresent(
+            Bool.self, forKey: .metalCaptureSkipDisplayPresent) ?? false
         metalCaptureFPS = try container.decodeIfPresent(Int.self, forKey: .metalCaptureFPS) ?? 120
         metalCaptureBitrateMbps = try container.decodeIfPresent(Int.self, forKey: .metalCaptureBitrateMbps) ?? 120
-        metalCaptureBuffers = try container.decodeIfPresent(Int.self, forKey: .metalCaptureBuffers) ?? 6
+        metalCaptureBuffers = try container.decodeIfPresent(Int.self, forKey: .metalCaptureBuffers) ?? 3
         metalCaptureLogInterval = try container.decodeIfPresent(Double.self, forKey: .metalCaptureLogInterval) ?? 1.0
         metalCaptureDisableDisplaySync = try container.decodeIfPresent(
             Bool.self, forKey: .metalCaptureDisableDisplaySync) ?? false
