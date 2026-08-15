@@ -5,9 +5,6 @@ import CoreFoundation
 import AVFoundation
 import CoreMedia
 
-// This standalone diagnostic script intentionally favors compact command parsing/output over app-style naming.
-// swiftlint:disable cyclomatic_complexity force_unwrapping identifier_name line_length
-
 private let fm = FileManager.default
 private let home = fm.homeDirectoryForCurrentUser
 private let root = home.appendingPathComponent("Library/Containers/io.playcover.PlayCover", isDirectory: true)

@@ -5,6 +5,7 @@ excluded:
   - Carthage
   - Pods
   - .build
+  - scripts
 
 identifier_name:
   allowed_symbols: ['_']
