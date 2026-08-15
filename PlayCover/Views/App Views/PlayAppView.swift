@@ -124,7 +124,6 @@ struct PlayAppConditionalView: View {
     @State var isList: Bool
     @State var hasPlayTools: Bool?
 
-
     var body: some View {
         Group {
             if isList {
