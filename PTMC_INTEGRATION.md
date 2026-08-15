@@ -67,7 +67,7 @@ PlayTools also includes upstream PR #229's fix that preserves the system Metal H
 
 ## Audio
 
-PlayCover captures only the selected game's audio using ScreenCaptureKit application audio at 48 kHz stereo AAC. It writes a temporary sidecar, then muxes it into the finalized PTMC MOV using the first video/audio host-time measurements and a passthrough AVAssetExportSession. No ScreenCaptureKit video is involved.
+PlayCover captures only the selected game's audio using ScreenCaptureKit application audio at 48 kHz stereo. It writes a temporary sidecar, then muxes it into the finalized PTMC MOV using the first video/audio host-time measurements and a passthrough AVAssetExportSession. No ScreenCaptureKit video is involved. During recording, the host prefers QuickTime/PCM passthrough instead of real-time AAC encoding, keeps a bounded 512-sample backlog for short AVAssetWriter stalls, and flushes that backlog before finalization. AAC remains a compatibility fallback if passthrough cannot be added. Audio diagnostics record writer drops, queue high-water mark, backpressure transitions, and source-timestamp gaps so later runtime tests can distinguish ScreenCaptureKit source loss from host writer pressure.
 
 A/V sync still requires real-device validation; CI only proves the code builds/packages.
 
