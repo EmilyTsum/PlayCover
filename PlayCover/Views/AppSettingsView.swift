@@ -287,7 +287,6 @@ struct MetalCaptureStatus {
         )
     }
 }
-
 extension MetalCaptureStatus {
     var totalDrops: Int { droppedPool + droppedEncoder + droppedLate + unsupported }
     var requestedMetricsVisible: Bool { presented > 0 || captured > 0 || encoded > 0 || totalDrops > 0 }
@@ -313,6 +312,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
     private var firstHostTimeNs: UInt64 = 0
     private var appendedSamples = 0
 
+    // swiftlint:disable:next function_body_length
     func start(bundleIdentifier: String) async throws {
         _ = await stop()
         droppedSamples = 0
@@ -568,6 +568,7 @@ enum MetalCaptureControl {
         }
     }
 
+    // swiftlint:disable:next function_body_length cyclomatic_complexity
     private static func muxAudio(
         videoURL: URL,
         audioResult: MetalCaptureAudioResult,
@@ -779,8 +780,10 @@ struct MetalCaptureView: View {
                             }
                         }
                     } else {
-                        Text("ProRes uses VideoToolbox hardware encoding when available and ignores the HEVC bitrate setting. " +
-                             "At 4K/120, disk bandwidth can be very high, especially with 422 HQ.")
+                        Text(
+                            "ProRes uses VideoToolbox hardware encoding when available and ignores the HEVC bitrate " +
+                            "setting. At 4K/120, disk bandwidth can be very high, especially with 422 HQ."
+                        )
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -985,7 +988,8 @@ struct MetalCaptureView: View {
 
             if let status = captureStatus {
                 Text(
-                    "hooks \(status.presentHookCount) • \(status.codec.uppercased()) • presented \(status.presented) • " +
+                    "hooks \(status.presentHookCount) • \(status.codec.uppercased()) • " +
+                    "presented \(status.presented) • " +
                     "captured \(status.captured) • encoded \(status.encoded) • drops \(status.totalDrops) • " +
                     "rate-skip \(status.skippedRate)"
                 )
