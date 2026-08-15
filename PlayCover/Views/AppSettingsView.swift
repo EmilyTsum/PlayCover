@@ -904,7 +904,6 @@ struct MetalCaptureView: View {
                             "opacity is restored on Stop."
                         )
 
-
                     Toggle("Skip display present while recording (unsafe experiment)",
                            isOn: $settings.settings.metalCaptureSkipDisplayPresent)
                         .help(
