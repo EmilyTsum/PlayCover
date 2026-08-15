@@ -1,0 +1,106 @@
+name: PTMC ad-hoc nightly
+
+on:
+  push:
+    branches: [ptmc-nightly]
+  workflow_dispatch:
+  schedule:
+    - cron: "45 19 * * *"
+
+permissions:
+  contents: read
+
+env:
+  CI: true
+  FASTLANE: 1
+
+concurrency:
+  group: ptmc-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+          sw_vers
+
+      - name: Install build dependencies
+        run: |
+          brew install carthage swiftlint
+
+      - name: Bootstrap PTMC PlayTools
+        run: |
+          carthage bootstrap --use-xcframeworks --cache-builds
+          expected=$(awk -F'"' '/EmilyTsum\/PlayTools/ {print $4}' Cartfile.resolved)
+          actual=$(git -C Carthage/Checkouts/PlayTools rev-parse HEAD)
+          echo "PlayTools expected=$expected actual=$actual"
+          test "$expected" = "$actual"
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'io.playcover.ptmc.start'
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_OUTPUT_DIR'
+
+      - name: Build PlayCover PTMC
+        shell: bash
+        run: |
+          set -o pipefail
+          rm -rf .ptmc-derived output
+          xcodebuild \
+            -project PlayCover.xcodeproj \
+            -scheme PlayCover \
+            -configuration Nightly \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath .ptmc-derived \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM= \
+            build | tee ptmc-xcodebuild.log
+
+      - name: Validate app and bundled PTMC
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP=$(find .ptmc-derived/Build/Products -type d -name PlayCover.app -print -quit)
+          test -n "$APP"
+          FRAME="$APP/Contents/Frameworks/PlayTools.framework"
+          test -f "$FRAME/PlayTools"
+          test -d "$FRAME/Versions/A"
+          test -L "$FRAME/Versions/Current"
+          strings "$FRAME/PlayTools" | grep -F 'io.playcover.ptmc.start'
+          strings "$FRAME/PlayTools" | grep -F 'PTMC_OUTPUT_DIR'
+          xcrun vtool -show-build "$FRAME/PlayTools"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+          mkdir -p output
+          ditto "$APP" output/PlayCover.app
+          git rev-parse HEAD > output/PLAYCOVER_COMMIT.txt
+          awk -F'"' '/EmilyTsum\/PlayTools/ {print $4}' Cartfile.resolved > output/PLAYTOOLS_COMMIT.txt
+          grep -E 'warning:' ptmc-xcodebuild.log > output/COMPILER_WARNINGS.txt || true
+
+      - name: Create ad-hoc DMG
+        run: |
+          hdiutil create \
+            -volname 'PlayCover PTMC' \
+            -srcfolder output/PlayCover.app \
+            -ov \
+            -format UDZO \
+            output/PlayCover-PTMC.dmg
+          shasum -a 256 output/PlayCover-PTMC.dmg | tee output/SHA256SUMS.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: PlayCover-PTMC-nightly
+          path: |
+            output/PlayCover-PTMC.dmg
+            output/SHA256SUMS.txt
+            output/PLAYCOVER_COMMIT.txt
+            output/PLAYTOOLS_COMMIT.txt
+            output/COMPILER_WARNINGS.txt

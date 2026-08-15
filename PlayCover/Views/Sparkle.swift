@@ -16,32 +16,21 @@ final class UpdaterViewModel: ObservableObject {
     @Published var canCheckForUpdates = false
 
     var automaticallyCheckForUpdates: Bool {
-        get {
-            updaterController.updater.automaticallyChecksForUpdates
-        }
-        set(newValue) {
-            updaterController.updater.automaticallyChecksForUpdates = newValue
-        }
+        get { false }
+        set { _ = newValue }
     }
 
     init() {
-        // If you want to start the updater manually, pass false to startingUpdater and call .startUpdater() later
-        // This is where you can also pass an updater delegate if you need one
+        // PTMC builds are distributed separately from the official Sparkle feed. Do not
+        // let an official update silently replace the bundled capture-enabled PlayTools.
         updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: false,
             updaterDelegate: nil,
             userDriverDelegate: nil)
-
-        updaterController.updater.publisher(for: \.canCheckForUpdates)
-            .assign(to: &$canCheckForUpdates)
-
-        if automaticallyCheckForUpdates {
-            updaterController.updater.checkForUpdatesInBackground()
-        }
     }
 
     func checkForUpdates() {
-        updaterController.checkForUpdates(nil)
+        // Updates are supplied by the PTMC GitHub release/Homebrew tap instead.
     }
 }
 

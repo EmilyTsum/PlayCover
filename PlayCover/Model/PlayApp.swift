@@ -161,6 +161,7 @@ extension PlayApp {
         for key in PlayApp.metalEnvKeys {
             unsetenv(key)
         }
+        config.environment = metalCaptureLaunchEnvironment()
 
         NSWorkspace.shared.openApplication(
             at: aliasURL,
@@ -185,6 +186,39 @@ extension PlayApp {
                 }
             }
         )
+    }
+
+    private func metalCaptureLaunchEnvironment() -> [String: String] {
+        let capture = settings.settings
+        guard capture.metalCaptureEnabled else {
+            return [
+                "PTMC_ENABLE": "0",
+                "PTMC_AUTOSTART": "0"
+            ]
+        }
+
+        let fps = min(max(capture.metalCaptureFPS, 1), 240)
+        let bitrateMbps = min(max(capture.metalCaptureBitrateMbps, 1), 1000)
+        let buffers = min(max(capture.metalCaptureBuffers, 3), 16)
+        let logInterval = min(max(capture.metalCaptureLogInterval, 0.25), 60.0)
+        let spoofMaxFPS = min(max(capture.metalCaptureSpoofMaxFPS, 0), 240)
+
+        var environment = [
+            "PTMC_ENABLE": "1",
+            "PTMC_AUTOSTART": capture.metalCaptureAutostart ? "1" : "0",
+            "PTMC_FPS": String(fps),
+            "PTMC_BITRATE": String(bitrateMbps * 1_000_000),
+            "PTMC_BUFFERS": String(buffers),
+            "PTMC_LOG_INTERVAL": String(logInterval),
+            "PTMC_DISABLE_DISPLAY_SYNC": capture.metalCaptureDisableDisplaySync ? "1" : "0",
+            "PTMC_SPOOF_MAX_FPS": String(spoofMaxFPS)
+        ]
+
+        let outputDirectory = capture.metalCaptureOutputDirectory.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !outputDirectory.isEmpty {
+            environment["PTMC_OUTPUT_DIR"] = NSString(string: outputDirectory).expandingTildeInPath
+        }
+        return environment
     }
 }
 

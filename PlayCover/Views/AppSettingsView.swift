@@ -7,6 +7,7 @@
 
 import SwiftUI
 import DataCache
+import CoreFoundation
 
 enum BlockingTask {
     case none, playTools, introspection, iosFrameworks, applicationCategoryType
@@ -84,6 +85,11 @@ struct AppSettingsView: View {
                 GraphicsView(settings: $viewModel.settings)
                     .tabItem {
                         Text("settings.tab.graphics")
+                    }
+                    .disabled(!(hasPlayTools ?? true))
+                MetalCaptureView(settings: $viewModel.settings, app: viewModel.app)
+                    .tabItem {
+                        Text("Metal Capture")
                     }
                     .disabled(!(hasPlayTools ?? true))
                 BypassesView(settings: $viewModel.settings,
@@ -183,6 +189,171 @@ struct KeymappingView: View {
                 Spacer()
             }
             .padding()
+        }
+    }
+}
+
+private enum MetalCaptureCommand: String {
+    case start
+    case stop
+    case status
+}
+
+enum MetalCaptureControl {
+    static func post(_ command: String, bundleIdentifier: String) {
+        guard let typedCommand = MetalCaptureCommand(rawValue: command) else { return }
+        let rawName = "io.playcover.ptmc.\(typedCommand.rawValue).\(bundleIdentifier)" as CFString
+        let name = CFNotificationName(rawValue: rawName)
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            name,
+            nil,
+            nil,
+            true)
+    }
+}
+
+struct MetalCaptureView: View {
+    @Binding var settings: AppSettings
+    let app: PlayApp
+
+    private var defaultOutputDescription: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Movies")
+            .appendingPathComponent("PlayTools-Capture-<timestamp>.mov")
+            .path
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Enable pre-compositor Metal capture for this game",
+                       isOn: $settings.settings.metalCaptureEnabled)
+
+                Group {
+                    Toggle("Start recording automatically when the game launches",
+                           isOn: $settings.settings.metalCaptureAutostart)
+
+                    HStack {
+                        Text("Capture frame rate")
+                        Spacer()
+                        Stepper(value: $settings.settings.metalCaptureFPS, in: 1...240) {
+                            Text("\(settings.settings.metalCaptureFPS) fps")
+                                .monospacedDigit()
+                                .frame(width: 90, alignment: .trailing)
+                        }
+                    }
+
+                    HStack {
+                        Text("HEVC bitrate")
+                        Spacer()
+                        Stepper(value: $settings.settings.metalCaptureBitrateMbps, in: 1...1000, step: 10) {
+                            Text("\(settings.settings.metalCaptureBitrateMbps) Mbps")
+                                .monospacedDigit()
+                                .frame(width: 110, alignment: .trailing)
+                        }
+                    }
+
+                    HStack {
+                        Text("NV12 buffer slots")
+                        Spacer()
+                        Stepper(value: $settings.settings.metalCaptureBuffers, in: 3...16) {
+                            Text("\(settings.settings.metalCaptureBuffers)")
+                                .monospacedDigit()
+                                .frame(width: 40, alignment: .trailing)
+                        }
+                    }
+
+                    HStack {
+                        Text("Status log interval")
+                        Spacer()
+                        Stepper(value: $settings.settings.metalCaptureLogInterval, in: 0.25...60, step: 0.25) {
+                            Text(String(format: "%.2f s", settings.settings.metalCaptureLogInterval))
+                                .monospacedDigit()
+                                .frame(width: 80, alignment: .trailing)
+                        }
+                    }
+
+                    Divider()
+
+                    Toggle("Disable CAMetalLayer display synchronization",
+                           isOn: $settings.settings.metalCaptureDisableDisplaySync)
+                        .help("Optional frame-pacing diagnostic. Leave off unless the game presents at only 60 fps.")
+
+                    HStack {
+                        Text("Spoof UIScreen maximum FPS")
+                        Spacer()
+                        Picker("", selection: $settings.settings.metalCaptureSpoofMaxFPS) {
+                            Text("Off").tag(0)
+                            Text("60").tag(60)
+                            Text("90").tag(90)
+                            Text("120").tag(120)
+                            Text("144").tag(144)
+                            Text("165").tag(165)
+                            Text("240").tag(240)
+                        }
+                        .frame(width: 130)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Output directory")
+                        HStack {
+                            TextField("Default: ~/Movies", text: $settings.settings.metalCaptureOutputDirectory)
+                            Button("Choose…") {
+                                chooseOutputDirectory()
+                            }
+                            Button("Default") {
+                                settings.settings.metalCaptureOutputDirectory = ""
+                            }
+                        }
+                        Text(settings.settings.metalCaptureOutputDirectory.isEmpty
+                             ? "Default: \(defaultOutputDescription)"
+                             : "A timestamped .mov file is created in this directory for every recording.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
+                    HStack {
+                        Button("Start Recording") {
+                            MetalCaptureControl.post("start", bundleIdentifier: app.info.bundleIdentifier)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("Stop Recording") {
+                            MetalCaptureControl.post("stop", bundleIdentifier: app.info.bundleIdentifier)
+                        }
+
+                        Button("Log Status") {
+                            MetalCaptureControl.post("status", bundleIdentifier: app.info.bundleIdentifier)
+                        }
+                        Spacer()
+                    }
+
+                    Text("Launch-time settings apply the next time this game starts. " +
+                         "Start/Stop/Status target only this game's bundle identifier and work immediately " +
+                         "while a PTMC-enabled game is running.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .disabled(!settings.settings.metalCaptureEnabled)
+            }
+            .padding()
+        }
+    }
+
+    private func chooseOutputDirectory() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.settings.metalCaptureOutputDirectory = url.path
         }
     }
 }

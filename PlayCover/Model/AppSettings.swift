@@ -52,6 +52,15 @@ struct AppSettingsData: Codable {
     var resizableAspectRatioHeight = 0
     var blockSleepSpamming = false
     var ignoreUnityKeyboardInitializationError = false
+    var metalCaptureEnabled = false
+    var metalCaptureAutostart = false
+    var metalCaptureFPS = 120
+    var metalCaptureBitrateMbps = 120
+    var metalCaptureBuffers = 6
+    var metalCaptureLogInterval = 1.0
+    var metalCaptureDisableDisplaySync = false
+    var metalCaptureSpoofMaxFPS = 0
+    var metalCaptureOutputDirectory = ""
 
     init() {}
 
@@ -95,6 +104,17 @@ struct AppSettingsData: Codable {
         blockSleepSpamming = try container.decodeIfPresent(Bool.self, forKey: .blockSleepSpamming) ?? false
         ignoreUnityKeyboardInitializationError = try container.decodeIfPresent(
             Bool.self, forKey: .ignoreUnityKeyboardInitializationError) ?? false
+        metalCaptureEnabled = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureEnabled) ?? false
+        metalCaptureAutostart = try container.decodeIfPresent(Bool.self, forKey: .metalCaptureAutostart) ?? false
+        metalCaptureFPS = try container.decodeIfPresent(Int.self, forKey: .metalCaptureFPS) ?? 120
+        metalCaptureBitrateMbps = try container.decodeIfPresent(Int.self, forKey: .metalCaptureBitrateMbps) ?? 120
+        metalCaptureBuffers = try container.decodeIfPresent(Int.self, forKey: .metalCaptureBuffers) ?? 6
+        metalCaptureLogInterval = try container.decodeIfPresent(Double.self, forKey: .metalCaptureLogInterval) ?? 1.0
+        metalCaptureDisableDisplaySync = try container.decodeIfPresent(
+            Bool.self, forKey: .metalCaptureDisableDisplaySync) ?? false
+        metalCaptureSpoofMaxFPS = try container.decodeIfPresent(Int.self, forKey: .metalCaptureSpoofMaxFPS) ?? 0
+        metalCaptureOutputDirectory = try container.decodeIfPresent(
+            String.self, forKey: .metalCaptureOutputDirectory) ?? ""
     }
 }
 
