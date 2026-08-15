@@ -5,6 +5,17 @@ import CoreFoundation
 import AVFoundation
 import CoreMedia
 
+
+private enum PTMCCLIError: LocalizedError {
+    case message(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .message(let text): return text
+        }
+    }
+}
+
 private let fm = FileManager.default
 private let home = fm.homeDirectoryForCurrentUser
 private let root = home.appendingPathComponent("Library/Containers/io.playcover.PlayCover", isDirectory: true)
@@ -119,37 +130,37 @@ private func configure(_ bundle: String, options: ArraySlice<String>) throws {
     }
     for option in options {
         let pair = option.split(separator: "=", maxSplits: 1).map(String.init)
-        guard pair.count == 2 else { throw "config option must be key=value: \(option)" }
+        guard pair.count == 2 else { throw PTMCCLIError.message("config option must be key=value: \(option)") }
         let key = pair[0]
         let value = pair[1]
         switch key {
         case "fps":
-            guard let number = Int(value), (1...240).contains(number) else { throw "fps must be 1...240" }
+            guard let number = Int(value), (1...240).contains(number) else { throw PTMCCLIError.message("fps must be 1...240") }
             runtime["fps"] = number
             app["metalCaptureFPS"] = number
         case "bitrate", "bitrateMbps":
-            guard let number = Int(value), (1...1000).contains(number) else { throw "bitrateMbps must be 1...1000" }
+            guard let number = Int(value), (1...1000).contains(number) else { throw PTMCCLIError.message("bitrateMbps must be 1...1000") }
             runtime["bitrate"] = number * 1_000_000
             app["metalCaptureBitrateMbps"] = number
         case "buffers":
-            guard let number = Int(value), (3...16).contains(number) else { throw "buffers must be 3...16" }
+            guard let number = Int(value), (3...16).contains(number) else { throw PTMCCLIError.message("buffers must be 3...16") }
             runtime["buffers"] = number
             app["metalCaptureBuffers"] = number
         case "forceSDR":
-            guard let flag = boolValue(value) else { throw "forceSDR must be true/false" }
+            guard let flag = boolValue(value) else { throw PTMCCLIError.message("forceSDR must be true/false") }
             runtime["forceSDRDisplay"] = flag
             app["metalCaptureForceSDRDisplay"] = flag
         case "disableSync":
-            guard let flag = boolValue(value) else { throw "disableSync must be true/false" }
+            guard let flag = boolValue(value) else { throw PTMCCLIError.message("disableSync must be true/false") }
             runtime["disableDisplaySync"] = flag
             app["metalCaptureDisableDisplaySync"] = flag
         case "codec":
             let allowed = ["hevc", "prores422lt", "prores422", "prores422hq"]
-            guard allowed.contains(value.lowercased()) else { throw "codec: \(allowed.joined(separator: ", "))" }
+            guard allowed.contains(value.lowercased()) else { throw PTMCCLIError.message("codec: \(allowed.joined(separator: ", "))") }
             runtime["codec"] = value.lowercased()
             app["metalCaptureCodec"] = value.lowercased()
         default:
-            throw "unknown config key: \(key)"
+            throw PTMCCLIError.message("unknown config key: \(key)")
         }
     }
     try writePlist(runtime, to: configURL(bundle))
@@ -191,8 +202,8 @@ private func inspect(_ bundle: String) {
     print("duration: \(String(format: "%.3f", CMTimeGetSeconds(asset.duration))) s")
     if let video = asset.tracks(withMediaType: .video).first {
         print("video:    \(Int(video.naturalSize.width))x\(Int(video.naturalSize.height)) @ \(String(format: "%.3f", video.nominalFrameRate)) fps")
-        if let desc = video.formatDescriptions.first as? CMFormatDescription {
-            print("codec:    \(fourCC(CMFormatDescriptionGetMediaSubType(desc)))")
+        if let description = video.formatDescriptions.first {
+            print("codec:    \(fourCC(CMFormatDescriptionGetMediaSubType(description)))")
         }
         print("bitrate:  \(Int(video.estimatedDataRate / 1_000_000)) Mbps estimated")
     }

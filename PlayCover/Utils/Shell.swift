@@ -89,8 +89,6 @@ class Shell: ObservableObject {
     static func setMetalHUD(_ bundleID: String, enabled: Bool) throws {
         try run("/usr/bin/defaults", "write", bundleID,
                 "MetalForceHudEnabled", "-bool", String(enabled))
-        try run("/usr/bin/defaults", "write", bundleID,
-                "MetalHUDForceEnabled", "-bool", String(enabled))
     }
 
     static func lldb(_ url: URL, withTerminalWindow: Bool = false) throws {

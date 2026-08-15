@@ -47,6 +47,8 @@ jobs:
           test -f Carthage/Checkouts/PlayTools/PlayTools/MetalCapture/PTMetalCapture.inc
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'io.playcover.ptmc.start'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_OUTPUT_DIR'
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'prores422lt'
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'frame hooks are dormant until Start'
 
       - name: Typecheck PTMC CLI
         run: |
@@ -80,6 +82,8 @@ jobs:
           test -L "$FRAME/Versions/Current"
           strings "$FRAME/PlayTools" | grep -F 'io.playcover.ptmc.start'
           strings "$FRAME/PlayTools" | grep -F 'PTMC_OUTPUT_DIR'
+          strings "$FRAME/PlayTools" | grep -F 'prores422lt'
+          strings "$FRAME/PlayTools" | grep -F 'frame hooks are dormant until Start'
           xcrun vtool -show-build "$FRAME/PlayTools"
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict "$APP"
