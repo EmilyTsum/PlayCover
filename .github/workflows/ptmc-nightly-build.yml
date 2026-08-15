@@ -63,6 +63,9 @@ jobs:
         run: |
           xcrun swiftc -typecheck scripts/ptmcctl.swift
 
+      - name: Validate PTMC audio writer invariants
+        run: scripts/verify_ptmc_audio.sh
+
       - name: Build PlayCover PTMC
         shell: bash
         run: |

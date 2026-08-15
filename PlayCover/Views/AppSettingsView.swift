@@ -346,7 +346,6 @@ struct MetalCaptureAudioResult {
     let backpressureEvents: Int
     let sourceGapCount: Int
     let sourceGapSeconds: Double
-    let passthroughPCM: Bool
 }
 
 private final class MetalCaptureSendableBox<Value>: @unchecked Sendable {
@@ -380,7 +379,6 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
     private var pendingHead = 0
     private var drainScheduled = false
     private var backpressureActive = false
-    private var passthroughPCM = true
     private var previousSampleEnd = CMTime.invalid
 
     private var pendingSampleCount: Int {
@@ -400,7 +398,6 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         pendingHead = 0
         drainScheduled = false
         backpressureActive = false
-        passthroughPCM = true
         previousSampleEnd = .invalid
 
         let content = try await SCShareableContent.excludingDesktopWindows(
@@ -436,7 +433,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
 
         let directory = MetalCapturePaths.captureDirectory(for: bundleIdentifier)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let audioURL = directory.appendingPathComponent("PTMC-Audio-active.mov")
+        let audioURL = directory.appendingPathComponent("PTMC-Audio-active.m4a")
         try? FileManager.default.removeItem(at: audioURL)
 
         let captureStream = SCStream(filter: filter, configuration: configuration, delegate: self)
@@ -524,35 +521,23 @@ private extension MetalCaptureAudioRecorder {
               let formatDescription = sampleBuffer.formatDescription else { return false }
 
         do {
-            let assetWriter = try AVAssetWriter(outputURL: url, fileType: .mov)
-            let passthroughInput = AVAssetWriterInput(
+            // ScreenCaptureKit app-audio buffers are PCM. AVAssetWriter passthrough
+            // (`outputSettings = nil`) is for media that is already in a compatible
+            // encoded format; using it here caused v0.1.9 to finalize video-only files.
+            // Keep the bounded backlog, but restore the known-good AAC writer path.
+            let assetWriter = try AVAssetWriter(outputURL: url, fileType: .m4a)
+            let selectedInput = AVAssetWriterInput(
                 mediaType: .audio,
-                outputSettings: nil,
+                outputSettings: [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: 48_000,
+                    AVNumberOfChannelsKey: 2,
+                    AVEncoderBitRateKey: 256_000
+                ],
                 sourceFormatHint: formatDescription
             )
-            passthroughInput.expectsMediaDataInRealTime = true
-
-            let selectedInput: AVAssetWriterInput
-            if assetWriter.canAdd(passthroughInput) {
-                selectedInput = passthroughInput
-                passthroughPCM = true
-            } else {
-                let fallbackInput = AVAssetWriterInput(
-                    mediaType: .audio,
-                    outputSettings: [
-                        AVFormatIDKey: kAudioFormatMPEG4AAC,
-                        AVSampleRateKey: 48_000,
-                        AVNumberOfChannelsKey: 2,
-                        AVEncoderBitRateKey: 256_000
-                    ],
-                    sourceFormatHint: formatDescription
-                )
-                fallbackInput.expectsMediaDataInRealTime = true
-                guard assetWriter.canAdd(fallbackInput) else { return false }
-                selectedInput = fallbackInput
-                passthroughPCM = false
-            }
-
+            selectedInput.expectsMediaDataInRealTime = true
+            guard assetWriter.canAdd(selectedInput) else { return false }
             assetWriter.add(selectedInput)
             guard assetWriter.startWriting() else {
                 Log.shared.log(
@@ -659,8 +644,7 @@ private extension MetalCaptureAudioRecorder {
             peakPendingSamples: peakPendingSamples,
             backpressureEvents: backpressureEvents,
             sourceGapCount: sourceGapCount,
-            sourceGapSeconds: sourceGapSeconds,
-            passthroughPCM: passthroughPCM
+            sourceGapSeconds: sourceGapSeconds
         )
         writer.finishWriting {
             let writer = writerBox.value
@@ -1029,9 +1013,8 @@ struct MetalCaptureView: View {
 
                     Toggle("Record game audio", isOn: $settings.settings.metalCaptureAudioEnabled)
                         .help(
-                            "Captures only the target game audio with ScreenCaptureKit at 48 kHz stereo. " +
-                            "PTMC buffers short writer stalls and prefers PCM passthrough during recording " +
-                            "to avoid real-time AAC encoder contention."
+                            "Captures only the target game audio with ScreenCaptureKit at 48 kHz stereo AAC. " +
+                            "PTMC buffers short AVAssetWriter stalls instead of dropping samples immediately."
                         )
 
                     Toggle("Include Metal HUD in recording", isOn: $settings.settings.metalCaptureIncludeHUD)
@@ -1474,7 +1457,7 @@ struct MetalCaptureView: View {
                     "backpressure=\(audioResult.backpressureEvents) " +
                     "sourceGaps=\(audioResult.sourceGapCount) " +
                     "sourceGapMs=\(String(format: "%.1f", audioResult.sourceGapSeconds * 1000)) " +
-                    "path=\(audioResult.passthroughPCM ? "PCM passthrough" : "AAC fallback")"
+                    "path=AAC 256k"
                 )
             } else {
                 audioState = settings.settings.metalCaptureAudioEnabled ? "none" : "disabled"
