@@ -31,6 +31,19 @@
   </p>
 </div>
 
+## PTMC nightly fork
+
+This public fork tracks PlayCover `develop` and bundles the `EmilyTsum/PlayTools` `metal-capture` branch. It adds per-game **Metal Capture** settings for pre-compositor Metal recording: target FPS, HEVC bitrate, NV12 ring size, output directory, optional frame-pacing probes, and bundle-targeted Start / Stop / Status controls.
+
+The packaged build is ad-hoc signed and is distributed separately from PlayCover's official Sparkle update channel. The intended install path is:
+
+```sh
+brew tap EmilyTsum/tap
+brew install --cask playcover-ptmc
+```
+
+See [`PTMC_INTEGRATION.md`](PTMC_INTEGRATION.md) for implementation and distribution details. The capture implementation itself remains in the public PlayTools fork.
+
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
