@@ -346,6 +346,9 @@ struct MetalCaptureAudioResult {
     let backpressureEvents: Int
     let sourceGapCount: Int
     let sourceGapSeconds: Double
+    let pcmZeroRunCount: Int
+    let pcmZeroSeconds: Double
+    let pcmZeroMaxSeconds: Double
 }
 
 private final class MetalCaptureSendableBox<Value>: @unchecked Sendable {
@@ -380,6 +383,11 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
     private var drainScheduled = false
     private var backpressureActive = false
     private var previousSampleEnd = CMTime.invalid
+    private var pcmZeroRunFrames = 0
+    private var pcmZeroRunCount = 0
+    private var pcmZeroTotalFrames = 0
+    private var pcmZeroMaxFrames = 0
+    private var pcmZeroSampleRate = 48_000.0
 
     private var pendingSampleCount: Int {
         max(0, pendingSamples.count - pendingHead)
@@ -399,6 +407,11 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         drainScheduled = false
         backpressureActive = false
         previousSampleEnd = .invalid
+        pcmZeroRunFrames = 0
+        pcmZeroRunCount = 0
+        pcmZeroTotalFrames = 0
+        pcmZeroMaxFrames = 0
+        pcmZeroSampleRate = 48_000.0
 
         let content = try await SCShareableContent.excludingDesktopWindows(
             false,
@@ -423,11 +436,13 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         configuration.excludesCurrentProcessAudio = true
         configuration.sampleRate = 48_000
         configuration.channelCount = 2
-        // PTMC only subscribes to audio. Keep internal screen work tiny, but leave enough
-        // ScreenCaptureKit queue depth to absorb short host-scheduling hiccups.
+        // PTMC only subscribes to audio. Keep internal screen work tiny, but do not throttle
+        // ScreenCaptureKit's display scheduler to 1 fps: real-device v0.1.10 evidence showed
+        // periodic zero-filled PCM while PTS stayed continuous. Keep the scheduler active at
+        // the documented 60 fps interval and use Apple's maximum recommended queue depth.
         configuration.width = 2
         configuration.height = 2
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         configuration.queueDepth = 8
         configuration.showsCursor = false
 
@@ -476,6 +491,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
             firstHostTimeNs = DispatchTime.now().uptimeNanoseconds
         }
         observeSourceTiming(sampleBuffer)
+        observePCMZeroRuns(sampleBuffer)
         guard prepareWriterIfNeeded(for: sampleBuffer) else {
             droppedSamples += 1
             return
@@ -513,6 +529,52 @@ private extension MetalCaptureAudioRecorder {
         } else if timestamp.isValid {
             previousSampleEnd = timestamp
         }
+    }
+
+    func observePCMZeroRuns(_ sampleBuffer: CMSampleBuffer) {
+        try? sampleBuffer.withAudioBufferList { audioBufferList, _ in
+            guard let description = sampleBuffer.formatDescription?.audioStreamBasicDescription,
+                  description.mSampleRate > 0,
+                  description.mChannelsPerFrame > 0,
+                  let format = AVAudioFormat(
+                    standardFormatWithSampleRate: description.mSampleRate,
+                    channels: AVAudioChannelCount(description.mChannelsPerFrame)
+                  ),
+                  let pcmBuffer = AVAudioPCMBuffer(
+                    pcmFormat: format,
+                    bufferListNoCopy: audioBufferList.unsafePointer
+                  ),
+                  let channelData = pcmBuffer.floatChannelData else { return }
+
+            pcmZeroSampleRate = description.mSampleRate
+            let channelCount = Int(pcmBuffer.format.channelCount)
+            let frameCount = Int(pcmBuffer.frameLength)
+            let threshold: Float = 0.000_001
+
+            for frame in 0..<frameCount {
+                var isZero = true
+                for channel in 0..<channelCount where abs(channelData[channel][frame]) > threshold {
+                    isZero = false
+                    break
+                }
+                if isZero {
+                    pcmZeroRunFrames += 1
+                } else {
+                    finishPCMZeroRunIfNeeded()
+                }
+            }
+        }
+    }
+
+    func finishPCMZeroRunIfNeeded() {
+        guard pcmZeroRunFrames > 0 else { return }
+        let minimumFrames = max(1, Int(pcmZeroSampleRate * 0.010))
+        if pcmZeroRunFrames >= minimumFrames {
+            pcmZeroRunCount += 1
+            pcmZeroTotalFrames += pcmZeroRunFrames
+            pcmZeroMaxFrames = max(pcmZeroMaxFrames, pcmZeroRunFrames)
+        }
+        pcmZeroRunFrames = 0
     }
 
     func prepareWriterIfNeeded(for sampleBuffer: CMSampleBuffer) -> Bool {
@@ -635,8 +697,10 @@ private extension MetalCaptureAudioRecorder {
             return
         }
 
+        finishPCMZeroRunIfNeeded()
         input.markAsFinished()
         let writerBox = MetalCaptureSendableBox(writer)
+        let pcmRate = max(1, pcmZeroSampleRate)
         let result = MetalCaptureAudioResult(
             url: url,
             firstHostTimeNs: firstHostTimeNs,
@@ -644,7 +708,10 @@ private extension MetalCaptureAudioRecorder {
             peakPendingSamples: peakPendingSamples,
             backpressureEvents: backpressureEvents,
             sourceGapCount: sourceGapCount,
-            sourceGapSeconds: sourceGapSeconds
+            sourceGapSeconds: sourceGapSeconds,
+            pcmZeroRunCount: pcmZeroRunCount,
+            pcmZeroSeconds: Double(pcmZeroTotalFrames) / pcmRate,
+            pcmZeroMaxSeconds: Double(pcmZeroMaxFrames) / pcmRate
         )
         writer.finishWriting {
             let writer = writerBox.value
@@ -672,6 +739,11 @@ private extension MetalCaptureAudioRecorder {
         drainScheduled = false
         backpressureActive = false
         previousSampleEnd = .invalid
+        pcmZeroRunFrames = 0
+        pcmZeroRunCount = 0
+        pcmZeroTotalFrames = 0
+        pcmZeroMaxFrames = 0
+        pcmZeroSampleRate = 48_000.0
     }
 }
 
@@ -1450,13 +1522,16 @@ struct MetalCaptureView: View {
             }
             audioResult = await MetalCaptureAudioRecorder.shared.stop()
             if let audioResult {
-                audioState = "muxing • drop \(audioResult.droppedSamples) • source gaps \(audioResult.sourceGapCount)"
+                audioState = "muxing • drop \(audioResult.droppedSamples) • source gaps \(audioResult.sourceGapCount) • zero runs \(audioResult.pcmZeroRunCount)"
                 Log.shared.log(
                     "PTMC audio finalized: drops=\(audioResult.droppedSamples) " +
                     "peakQueue=\(audioResult.peakPendingSamples) " +
                     "backpressure=\(audioResult.backpressureEvents) " +
                     "sourceGaps=\(audioResult.sourceGapCount) " +
                     "sourceGapMs=\(String(format: "%.1f", audioResult.sourceGapSeconds * 1000)) " +
+                    "pcmZeroRuns=\(audioResult.pcmZeroRunCount) " +
+                    "pcmZeroMs=\(String(format: "%.1f", audioResult.pcmZeroSeconds * 1000)) " +
+                    "pcmZeroMaxMs=\(String(format: "%.1f", audioResult.pcmZeroMaxSeconds * 1000)) " +
                     "path=AAC 256k"
                 )
             } else {
