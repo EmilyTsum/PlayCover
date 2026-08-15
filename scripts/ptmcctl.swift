@@ -202,8 +202,12 @@ private func inspect(_ bundle: String) {
     print("duration: \(String(format: "%.3f", CMTimeGetSeconds(asset.duration))) s")
     if let video = asset.tracks(withMediaType: .video).first {
         print("video:    \(Int(video.naturalSize.width))x\(Int(video.naturalSize.height)) @ \(String(format: "%.3f", video.nominalFrameRate)) fps")
-        if let description = video.formatDescriptions.first {
-            print("codec:    \(fourCC(CMFormatDescriptionGetMediaSubType(description)))")
+        if let rawDescription = video.formatDescriptions.first {
+            let cfDescription = rawDescription as CFTypeRef
+            if CFGetTypeID(cfDescription) == CMFormatDescriptionGetTypeID() {
+                let description = unsafeBitCast(cfDescription, to: CMFormatDescription.self)
+                print("codec:    \(fourCC(CMFormatDescriptionGetMediaSubType(description)))")
+            }
         }
         print("bitrate:  \(Int(video.estimatedDataRate / 1_000_000)) Mbps estimated")
     }
