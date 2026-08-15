@@ -342,6 +342,14 @@ struct MetalCaptureAudioResult {
     let firstHostTimeNs: UInt64
 }
 
+private final class MetalCaptureSendableBox<Value>: @unchecked Sendable {
+    let value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+}
+
 @available(macOS 13.0, *)
 final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     static let shared = MetalCaptureAudioRecorder()
@@ -447,7 +455,9 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
                     return
                 }
                 input.markAsFinished()
+                let writerBox = MetalCaptureSendableBox(writer)
                 writer.finishWriting {
+                    let writer = writerBox.value
                     let completed = writer.status == .completed
                     let result = completed
                         ? MetalCaptureAudioResult(url: url, firstHostTimeNs: self.firstHostTimeNs)
@@ -685,9 +695,10 @@ enum MetalCaptureControl {
         }
         exporter.outputURL = muxedURL
         exporter.outputFileType = .mov
+        let exporterBox = MetalCaptureSendableBox(exporter)
         let exported = await withCheckedContinuation { continuation in
             exporter.exportAsynchronously {
-                continuation.resume(returning: exporter.status == .completed)
+                continuation.resume(returning: exporterBox.value.status == .completed)
             }
         }
         guard exported else {
