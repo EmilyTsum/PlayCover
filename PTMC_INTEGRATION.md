@@ -2,7 +2,7 @@
 
 This branch follows upstream PlayCover `develop` and bundles the public `EmilyTsum/PlayTools` `metal-capture` branch.
 
-Pinned PlayTools commit at this revision: `46001aea2b2afad86936e1fd4adab0946e387b46`.
+Pinned PlayTools commit at this revision: `d01eb6c94cf5919cd1bd51448bf9010c00b8d67a`.
 
 ## User-facing control
 
@@ -95,3 +95,5 @@ The Metal Performance HUD remains enabled by default for diagnostics, but captur
 Repeated Start commands no longer reset a live PTMC session or discard capture-layer restoration state. The direct-drawable Metal command queue is created during asynchronous session preparation instead of on the first captured frame. PlayCover also avoids a duplicate PTMC config write at launch, guarantees `isStarting` is cleared on every early-return/error path, uses asynchronous sleeps for app-lifecycle monitoring, and removes the stale `await` around the callback-based IPA picker.
 
 The present hot path also caches the active `CAMetalLayer` address so unchanged frames avoid an atomic Objective-C property lookup/exchange, accesses `CAMetalDrawable.layer` directly, and folds the optional present-bypass decision into the existing capture pass instead of re-reading the drawable texture and manager state a second time.
+
+PTMC also removes the per-frame Objective-C VideoToolbox callback-context allocation: callback metadata now lives on each preallocated IOSurface slot and is reused only after VideoToolbox releases that slot. This leaves the frame path without a per-frame PTMC context object allocation.
