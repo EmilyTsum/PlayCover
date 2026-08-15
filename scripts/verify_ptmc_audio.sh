@@ -15,6 +15,8 @@ grep -Fq 'AVEncoderBitRateKey: 256_000' "$source_file"
 grep -Fq 'drainPendingSamples' "$source_file"
 grep -Fq 'observePCMZeroRuns(sampleBuffer)' "$source_file"
 grep -Fq 'pcmZeroMaxMs=' "$source_file"
+grep -Fq 'hasSufficientMuxSpace(videoURL: videoURL, audioURL: audioResult.url)' "$source_file"
+grep -Fq 'validateMuxedCapture(muxedURL)' "$source_file"
 
 if grep -Fq 'configuration.minimumFrameInterval = CMTime(value: 1, timescale: 1)' "$source_file"; then
   echo 'PTMC audio must not throttle ScreenCaptureKit to 1 fps' >&2

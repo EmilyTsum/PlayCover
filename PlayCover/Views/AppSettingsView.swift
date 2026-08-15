@@ -431,20 +431,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
             including: [application],
             exceptingWindows: []
         )
-        let configuration = SCStreamConfiguration()
-        configuration.capturesAudio = true
-        configuration.excludesCurrentProcessAudio = true
-        configuration.sampleRate = 48_000
-        configuration.channelCount = 2
-        // PTMC only subscribes to audio. Keep internal screen work tiny, but do not throttle
-        // ScreenCaptureKit's display scheduler to 1 fps: real-device v0.1.10 evidence showed
-        // periodic zero-filled PCM while PTS stayed continuous. Keep the scheduler active at
-        // the documented 60 fps interval and use Apple's maximum recommended queue depth.
-        configuration.width = 2
-        configuration.height = 2
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-        configuration.queueDepth = 8
-        configuration.showsCursor = false
+        let configuration = makeStreamConfiguration()
 
         let directory = MetalCapturePaths.captureDirectory(for: bundleIdentifier)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -513,6 +500,23 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
 
 @available(macOS 13.0, *)
 private extension MetalCaptureAudioRecorder {
+    func makeStreamConfiguration() -> SCStreamConfiguration {
+        let configuration = SCStreamConfiguration()
+        configuration.capturesAudio = true
+        configuration.excludesCurrentProcessAudio = true
+        configuration.sampleRate = 48_000
+        configuration.channelCount = 2
+        // PTMC only subscribes to audio. Keep internal screen work tiny, but do not throttle
+        // ScreenCaptureKit's display scheduler to 1 fps: v0.1.10 real-device evidence showed
+        // periodic zero-filled PCM while PTS stayed continuous.
+        configuration.width = 2
+        configuration.height = 2
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        configuration.queueDepth = 8
+        configuration.showsCursor = false
+        return configuration
+    }
+
     func observeSourceTiming(_ sampleBuffer: CMSampleBuffer) {
         let timestamp = sampleBuffer.presentationTimeStamp
         let duration = sampleBuffer.duration
@@ -533,13 +537,11 @@ private extension MetalCaptureAudioRecorder {
 
     func observePCMZeroRuns(_ sampleBuffer: CMSampleBuffer) {
         try? sampleBuffer.withAudioBufferList { audioBufferList, _ in
-            guard let description = sampleBuffer.formatDescription?.audioStreamBasicDescription,
+            guard let formatDescription = sampleBuffer.formatDescription,
+                  let description = formatDescription.audioStreamBasicDescription,
                   description.mSampleRate > 0,
-                  description.mChannelsPerFrame > 0,
-                  let format = AVAudioFormat(
-                    standardFormatWithSampleRate: description.mSampleRate,
-                    channels: AVAudioChannelCount(description.mChannelsPerFrame)
-                  ),
+                  let format = AVAudioFormat(cmAudioFormatDescription: formatDescription),
+                  format.commonFormat == .pcmFormatFloat32,
                   let pcmBuffer = AVAudioPCMBuffer(
                     pcmFormat: format,
                     bufferListNoCopy: audioBufferList.unsafePointer
@@ -552,10 +554,16 @@ private extension MetalCaptureAudioRecorder {
             let threshold: Float = 0.000_001
 
             for frame in 0..<frameCount {
-                var isZero = true
-                for channel in 0..<channelCount where abs(channelData[channel][frame]) > threshold {
-                    isZero = false
-                    break
+                let isZero: Bool
+                if pcmBuffer.format.isInterleaved {
+                    let base = frame * channelCount
+                    isZero = (0..<channelCount).allSatisfy {
+                        abs(channelData[0][base + $0]) <= threshold
+                    }
+                } else {
+                    isZero = (0..<channelCount).allSatisfy {
+                        abs(channelData[$0][frame]) <= threshold
+                    }
                 }
                 if isZero {
                     pcmZeroRunFrames += 1
@@ -915,6 +923,8 @@ enum MetalCaptureControl {
             return false
         }
 
+        guard hasSufficientMuxSpace(videoURL: videoURL, audioURL: audioResult.url) else { return false }
+
         let muxedURL = videoURL.deletingPathExtension().appendingPathExtension("muxed.mov")
         try? FileManager.default.removeItem(at: muxedURL)
         guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
@@ -933,6 +943,11 @@ enum MetalCaptureControl {
                 "PTMC mux export failed: \(exporter.error?.localizedDescription ?? "unknown error")",
                 isError: true
             )
+            return false
+        }
+        guard validateMuxedCapture(muxedURL) else {
+            try? FileManager.default.removeItem(at: muxedURL)
+            Log.shared.log("PTMC mux validation failed; preserving original video and audio sidecar", isError: true)
             return false
         }
 
@@ -954,6 +969,40 @@ enum MetalCaptureControl {
             Log.shared.log("PTMC mux replace failed: \(error.localizedDescription)", isError: true)
             return false
         }
+    }
+
+    private static func hasSufficientMuxSpace(videoURL: URL, audioURL: URL) -> Bool {
+        let fileManager = FileManager.default
+        let videoAttributes = try? fileManager.attributesOfItem(atPath: videoURL.path)
+        let audioAttributes = try? fileManager.attributesOfItem(atPath: audioURL.path)
+        guard let videoSize = (videoAttributes?[.size] as? NSNumber)?.int64Value,
+              let audioSize = (audioAttributes?[.size] as? NSNumber)?.int64Value,
+              let available = (try? fileManager.attributesOfFileSystem(
+                forPath: videoURL.deletingLastPathComponent().path
+              )[.systemFreeSize] as? NSNumber)?.int64Value else { return true }
+
+        // Passthrough export writes a second copy of the movie before the original is atomically
+        // replaced. The backup step is a rename, not another full copy. Reserve 1 GiB beyond the
+        // expected muxed size for container/exporter overhead.
+        let reserve: Int64 = 1_073_741_824
+        let required = videoSize + audioSize + reserve
+        guard available >= required else {
+            Log.shared.log(
+                "PTMC mux skipped: insufficient disk space; required=\(required) available=\(available). " +
+                "Preserving video-only capture and audio sidecar.",
+                isError: true
+            )
+            return false
+        }
+        return true
+    }
+
+    private static func validateMuxedCapture(_ url: URL) -> Bool {
+        let asset = AVURLAsset(url: url)
+        guard asset.tracks(withMediaType: .video).first != nil,
+              asset.tracks(withMediaType: .audio).first != nil else { return false }
+        let seconds = CMTimeGetSeconds(asset.duration)
+        return seconds.isFinite && seconds > 0
     }
 
     private static func minimumTime(_ lhs: CMTime, _ rhs: CMTime) -> CMTime {
@@ -1436,9 +1485,15 @@ struct MetalCaptureView: View {
                 .foregroundStyle(.secondary)
             }
 
-            Text("staging: \(partialFiles) recording • \(completedFiles) completed • audio \(audioState)")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                if audioState == "finalizing" || audioState.hasPrefix("muxing") {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                Text("staging: \(partialFiles) recording • \(completedFiles) completed • audio \(audioState)")
+            }
+            .font(.caption2.monospacedDigit())
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -1522,7 +1577,8 @@ struct MetalCaptureView: View {
             }
             audioResult = await MetalCaptureAudioRecorder.shared.stop()
             if let audioResult {
-                audioState = "muxing • drop \(audioResult.droppedSamples) • source gaps \(audioResult.sourceGapCount) • zero runs \(audioResult.pcmZeroRunCount)"
+                audioState = "muxing • drop \(audioResult.droppedSamples) • " +
+                    "source gaps \(audioResult.sourceGapCount) • zero runs \(audioResult.pcmZeroRunCount)"
                 Log.shared.log(
                     "PTMC audio finalized: drops=\(audioResult.droppedSamples) " +
                     "peakQueue=\(audioResult.peakPendingSamples) " +
