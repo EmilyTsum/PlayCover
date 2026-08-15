@@ -164,29 +164,60 @@ extension PlayApp {
         }
         config.environment = metalCaptureLaunchEnvironment()
 
-        NSWorkspace.shared.openApplication(
-            at: aliasURL,
-            configuration: config,
-            completionHandler: { runningApp, error in
-                guard error == nil else { return }
-                // Run a thread loop in the background to handle background tasks
-                Task(priority: .background) {
-                    if let runningApp = runningApp {
-                        while !(runningApp.isTerminated) {
-                            if runningApp.isActive {
-                                self.disableTimeOut()
-                            } else {
-                                self.enableTimeOut()
-                            }
-                            sleep(1)
-                        }
-                        sleep(1)
-                    }
-                    // Things that are run after the app is closed
-                    self.lockKeyCover()
-                }
+        openGameApplication(configuration: config)
+    }
+
+    private func openGameApplication(configuration: NSWorkspace.OpenConfiguration) {
+        // Launch the real wrapped app first. The user-facing alias under ~/Applications/PlayCover
+        // is a synthetic .app directory whose top-level contents are symlinks. Newer macOS
+        // LaunchServices versions can reject that synthetic bundle with
+        // "The application PlayCover does not have permission to open (null)" even though the
+        // underlying wrapped app launches normally from Finder.
+        let primaryURL = url.standardizedFileURL
+        NSWorkspace.shared.openApplication(at: primaryURL, configuration: configuration) { runningApp, error in
+            if let error = error {
+                Log.shared.log("Failed to launch wrapped app at \(primaryURL.path): \(error.localizedDescription)",
+                               isError: true)
+                self.openAliasFallback(configuration: configuration)
+                return
             }
-        )
+            self.monitorLaunchedApplication(runningApp)
+        }
+    }
+
+    private func openAliasFallback(configuration: NSWorkspace.OpenConfiguration) {
+        guard aliasURL.standardizedFileURL != url.standardizedFileURL,
+              FileManager.default.fileExists(atPath: aliasURL.path) else {
+            return
+        }
+
+        NSWorkspace.shared.openApplication(at: aliasURL, configuration: configuration) { runningApp, error in
+            if let error = error {
+                Log.shared.log("Failed to launch app alias at \(self.aliasURL.path): \(error.localizedDescription)",
+                               isError: true)
+                return
+            }
+            self.monitorLaunchedApplication(runningApp)
+        }
+    }
+
+    private func monitorLaunchedApplication(_ runningApp: NSRunningApplication?) {
+        // Run a thread loop in the background to handle background tasks.
+        Task(priority: .background) {
+            if let runningApp = runningApp {
+                while !runningApp.isTerminated {
+                    if runningApp.isActive {
+                        self.disableTimeOut()
+                    } else {
+                        self.enableTimeOut()
+                    }
+                    sleep(1)
+                }
+                sleep(1)
+            }
+            // Things that are run after the app is closed.
+            self.lockKeyCover()
+        }
     }
 
     private func metalCaptureLaunchEnvironment() -> [String: String] {
