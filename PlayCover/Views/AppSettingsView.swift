@@ -292,13 +292,12 @@ extension MetalCaptureStatus {
     var requestedMetricsVisible: Bool { presented > 0 || captured > 0 || encoded > 0 || totalDrops > 0 }
 }
 
-
 struct MetalCaptureAudioResult {
     let url: URL
     let firstHostTimeNs: UInt64
 }
 
-@available(macOS 12.3, *)
+@available(macOS 13.0, *)
 final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
     static let shared = MetalCaptureAudioRecorder()
 
@@ -1045,7 +1044,7 @@ struct MetalCaptureView: View {
     private func startRecording() async {
         audioState = settings.settings.metalCaptureAudioEnabled ? "preparing" : "disabled"
         if settings.settings.metalCaptureAudioEnabled {
-            if #available(macOS 12.3, *) {
+            if #available(macOS 13.0, *) {
                 do {
                     try await MetalCaptureAudioRecorder.shared.start(
                         bundleIdentifier: app.info.bundleIdentifier
@@ -1083,7 +1082,7 @@ struct MetalCaptureView: View {
         )
 
         var audioResult: MetalCaptureAudioResult?
-        if #available(macOS 12.3, *) {
+        if #available(macOS 13.0, *) {
             if settings.settings.metalCaptureAudioEnabled {
                 audioState = "finalizing"
             }

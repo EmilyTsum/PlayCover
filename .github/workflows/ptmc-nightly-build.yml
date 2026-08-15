@@ -47,6 +47,10 @@ jobs:
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'io.playcover.ptmc.start'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_OUTPUT_DIR'
 
+      - name: Typecheck PTMC CLI
+        run: |
+          xcrun swiftc -typecheck scripts/ptmcctl.swift
+
       - name: Build PlayCover PTMC
         shell: bash
         run: |

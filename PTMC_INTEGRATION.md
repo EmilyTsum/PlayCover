@@ -43,3 +43,17 @@ Game audio is captured separately by PlayCover with ScreenCaptureKit's applicati
 Frame-path hooks are installed only when Start Recording is requested. Direct `CAMetalDrawable.present*` is preferred on real-device Unity; command-buffer interception is only a fallback. On Stop, PTMC restores the original Metal method implementations, so the idle game returns to native dispatch with no per-frame PTMC wrapper. The UI reads the runtime heartbeat without continuously posting status notifications or rewriting configuration.
 
 The Metal Performance HUD launch environment explicitly enables the HUD menu bar (`MTL_HUD_DISABLE_MENU_BAR=0`) whenever the per-app Metal HUD toggle is enabled.
+
+## CLI controller
+
+On macOS, `scripts/ptmcctl.swift` provides direct runtime diagnostics without opening App Settings:
+
+```sh
+./scripts/ptmcctl.swift status com.example.game
+./scripts/ptmcctl.swift start com.example.game
+./scripts/ptmcctl.swift record com.example.game 10
+./scripts/ptmcctl.swift config com.example.game fps=60 codec=prores422lt forceSDR=true
+./scripts/ptmcctl.swift inspect com.example.game
+```
+
+The CLI uses the same targeted Darwin notifications and PTMC runtime plist as PlayCover. Audio recording remains host-owned by PlayCover because ScreenCaptureKit permission and per-application audio filtering belong to the host process.
