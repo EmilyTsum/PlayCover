@@ -2,7 +2,7 @@
 
 This branch follows upstream PlayCover `develop` and bundles the public `EmilyTsum/PlayTools` `metal-capture` branch.
 
-Pinned PlayTools commit at this revision: `64c956c10a2b76185682bed996c9fbb7f37aab53`.
+Pinned PlayTools commit at this revision: `c74980193066091da821dc3f9bb2e26b281bbde4`.
 
 ## User-facing control
 
@@ -57,3 +57,5 @@ On macOS, `scripts/ptmcctl.swift` provides direct runtime diagnostics without op
 ```
 
 The CLI uses the same targeted Darwin notifications and PTMC runtime plist as PlayCover. Audio recording remains host-owned by PlayCover because ScreenCaptureKit permission and per-application audio filtering belong to the host process.
+
+For ProRes, PTMC uses a BGRA IOSurface ring and a direct Metal blit instead of running the full BGRA-to-NV12 compute conversion used by HEVC. This reduces PTMC GPU work; the Apple ProRes hardware encoder performs the required codec-side conversion.

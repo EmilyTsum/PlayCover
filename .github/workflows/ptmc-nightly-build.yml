@@ -42,7 +42,9 @@ jobs:
           carthage bootstrap --use-xcframeworks --cache-builds
           expected=$(awk -F'"' '/EmilyTsum\/PlayTools/ {print $4}' Cartfile.resolved)
           echo "PlayTools pinned commit=$expected"
-          git ls-remote https://github.com/EmilyTsum/PlayTools.git | grep -F "$expected"
+          actual=$(git -C Carthage/Checkouts/PlayTools rev-parse HEAD)
+          echo "PlayTools checkout commit=$actual"
+          test "$actual" = "$expected"
           test -f Carthage/Checkouts/PlayTools/PlayTools/MetalCapture/PTMetalCapture.inc
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'io.playcover.ptmc.start'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_OUTPUT_DIR'
