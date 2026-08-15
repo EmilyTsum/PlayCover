@@ -2,7 +2,7 @@
 
 This branch follows upstream PlayCover `develop` and bundles the public `EmilyTsum/PlayTools` `metal-capture` branch.
 
-Pinned PlayTools commit at this revision: `a93adc954527eade3e03404e068769429a647067`.
+Pinned PlayTools commit at this revision: `d11174ef62fb2651d47b62f2ab08cb3abf19b3fd`.
 
 ## User-facing control
 
