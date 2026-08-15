@@ -87,11 +87,12 @@ struct AppSettingsView: View {
                         Text("settings.tab.graphics")
                     }
                     .disabled(!(hasPlayTools ?? true))
-                MetalCaptureView(settings: $viewModel.settings, app: viewModel.app)
+                MetalCaptureView(settings: $viewModel.settings,
+                                 app: viewModel.app,
+                                 hasPlayTools: hasPlayTools)
                     .tabItem {
                         Text("Capture")
                     }
-                    .disabled(!(hasPlayTools ?? true))
                 BypassesView(settings: $viewModel.settings,
                              hasPlayTools: $hasPlayTools,
                              task: $currentTask,
@@ -216,6 +217,7 @@ enum MetalCaptureControl {
 struct MetalCaptureView: View {
     @Binding var settings: AppSettings
     let app: PlayApp
+    let hasPlayTools: Bool?
 
     private var defaultOutputDescription: String {
         FileManager.default.homeDirectoryForCurrentUser
@@ -240,6 +242,19 @@ struct MetalCaptureView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
+
+            if hasPlayTools == false {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text("PlayTools was not detected in this game's executable. Capture settings can still be configured, " +
+                         "but recording requires PlayTools to be installed for the game.")
+                        .font(.caption)
+                    Spacer()
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+            }
 
             Divider()
 
