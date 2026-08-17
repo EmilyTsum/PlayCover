@@ -261,6 +261,7 @@ struct MetalCaptureStatus {
     let framebufferOnly: Int
     let edr: Int
     let presentHookCount: Int
+    let presentPath: String
     let captureEnabled: Bool
     let displaySuppressed: Bool
     let displayPresentSkipped: Bool
@@ -318,6 +319,7 @@ struct MetalCaptureStatus {
             framebufferOnly: integer("framebufferOnly"),
             edr: integer("edr"),
             presentHookCount: integer("presentHookCount"),
+            presentPath: values["presentPath"] as? String ?? "undetermined",
             captureEnabled: (values["captureEnabled"] as? NSNumber)?.boolValue ?? false,
             displaySuppressed: (values["displaySuppressed"] as? NSNumber)?.boolValue ?? false,
             displayPresentSkipped: (values["displayPresentSkipped"] as? NSNumber)?.boolValue ?? false,
@@ -1597,7 +1599,7 @@ struct MetalCaptureView: View {
 
             if let status = captureStatus {
                 Text(
-                    "hooks \(status.presentHookCount) • \(status.codec.uppercased()) • " +
+                    "hooks \(status.presentHookCount) • path \(status.presentPath) • \(status.codec.uppercased()) • " +
                     "present \(String(format: "%.1f", status.presentFPS)) fps • " +
                     "capture \(String(format: "%.1f", status.captureFPS)) fps • " +
                     "encode \(String(format: "%.1f", status.encodedFPS)) fps"
@@ -1612,6 +1614,16 @@ struct MetalCaptureView: View {
                 )
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
+                if status.phase == "requested", status.presented == 0,
+                   commandSentAt.map({ pollNow.timeIntervalSince($0) > 2.0 }) == true {
+                    Text(
+                        "No compatible Metal presentation has been observed yet. PTMC supports Metal renderers " +
+                        "independently of engine, but the app must present a supported CAMetalDrawable/MTLCommandBuffer " +
+                        "surface using BGRA8Unorm or BGRA8Unorm_sRGB."
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                }
                 if status.samplingSkipPerSecond > 1,
                    status.presentFPS > Double(settings.settings.metalCaptureFPS) + 5 {
                     Text(

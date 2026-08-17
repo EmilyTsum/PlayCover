@@ -71,7 +71,8 @@ private func status(_ bundle: String, compact: Bool = false) -> [String: Any] {
         int(values, "droppedLate") + int(values, "unsupported")
     if compact {
         print(
-            "phase=\(string(values, "phase")) codec=\(string(values, "codec")) " +
+            "phase=\(string(values, "phase")) path=\(string(values, "presentPath")) " +
+            "codec=\(string(values, "codec")) " +
             "presented=\(int(values, "presented")) captured=\(int(values, "captured")) " +
             "encoded=\(int(values, "encoded")) drops=\(drops) samplingSkip=\(int(values, "samplingSkipped"))"
         )
@@ -84,6 +85,7 @@ private func status(_ bundle: String, compact: Bool = false) -> [String: Any] {
     print("drawable:     \(int(values, "drawableWidth"))x\(int(values, "drawableHeight"))")
     print("pixel format: \(int(values, "pixelFormat"))")
     print("hooks:        \(int(values, "presentHookCount"))")
+    print("present path: \(string(values, "presentPath"))")
     print("presented:    \(int(values, "presented"))")
     print("captured:     \(int(values, "captured"))")
     print("encoded:      \(int(values, "encoded"))")

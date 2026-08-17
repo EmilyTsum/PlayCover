@@ -6,7 +6,7 @@ This file is the first document to read for the `ptmc-nightly` branch. It record
 
 - PlayCover branch: `EmilyTsum/PlayCover:ptmc-nightly`
 - PlayTools branch: `EmilyTsum/PlayTools:metal-capture`
-- Pinned PlayTools commit: `ee13209dc51ca1722fa449927e6fed82daf882b3`
+- Pinned PlayTools commit: `f939f52a64dc70a0dcba9231ff8f315b9a0743cd`
 - Legacy overlay repository is retained only for reproducibility; it is not the active implementation.
 
 `Cartfile.resolved` is authoritative for the PlayTools revision bundled into PlayCover. CI writes both PlayCover and PlayTools commit IDs into every DMG artifact.
@@ -28,6 +28,12 @@ Keep these invariants unless real-device evidence justifies changing them:
 - Runtime present hooks are installed only while recording and original IMPs are restored on Stop.
 - Direct `CAMetalDrawable.present*` interception is the primary Unity path observed on real hardware. `MTLCommandBuffer presentDrawable:*` remains a fallback.
 - Supported source formats are currently BGRA8Unorm and BGRA8Unorm_sRGB. Do not claim HDR drawable-format support without implementing and testing it explicitly.
+
+## Engine compatibility
+
+PTMC is not Unity-specific. The capture boundary is Metal presentation, not a Unity API: during an active recording it discovers `CAMetalDrawable` implementations and `MTLCommandBuffer` presentation methods. Both presentation families are installed and the first one that actually presents a drawable wins for that recording, preventing duplicate capture while covering engines that use different Metal presentation APIs. This keeps the observed Unity path while broadening compatibility to Unreal Engine and custom Metal renderers. The selected route is exported as `presentPath` in runtime status.
+
+Current capture-format support is still intentionally narrow: the presented drawable must expose `BGRA8Unorm` or `BGRA8Unorm_sRGB`. Apps that render through a different pixel format, do not use a Metal drawable presentation path, or hide their final surface behind an unsupported framework can remain uncapturable until a format/path adapter is added. Do not describe PTMC as universally compatible with every iOS renderer.
 
 ## GPU / encoder path
 
