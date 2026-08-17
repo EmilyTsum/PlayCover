@@ -8,13 +8,13 @@ Base for all PlayCover branches below: current `PlayCover/PlayCover:develop` (`7
 
 | Proposed PR | Fork branch | Commit | Scope | Validation |
 | --- | --- | --- | --- | --- |
-| Fix resilient per-app settings persistence | `upstream/fix-app-settings-persistence` | `5102f2d96790ff449562b440a5b3e9cd854e84cc` | Atomic plist writes, no write-back while decoding, preserve unreadable plist, retain bundle ID on reset | Fork SwiftLint PASS |
-| Stabilize and move app-library refresh off main actor | `upstream/perf-app-library-refresh` | `a581149701f7a31afd5549c0d545ce07aac6552c` | Background directory/plist scan, cancelled stale refreshes, atomic bundle-ID cache reconciliation, preserve `PlayApp` identity while bundle is unchanged | Fork SwiftLint PASS |
-| Sanitize copied PlayTools plugin before signing | `upstream/fix-playtools-plugin-xattrs` | `0d47d1182b7e3d45f09cc02905dea3edc5d7fec1` | Clear FinderInfo/resource-fork xattrs immediately before ad-hoc signing | Fork SwiftLint PASS |
-| Guarantee IPA temporary-directory cleanup | `upstream/fix-installer-temp-cleanup` | `c6f147b147aebb752da7bb4d5d18f6f60f04e4c2` | `defer` cleanup covers success, early return and thrown error | Fork SwiftLint PASS |
-| Cache and deduplicate iTunes lookups | `upstream/perf-itunes-request-dedup` | `c1fc9043e79740307f6e9a49572aabe75be399e7` | Cache-first lookup and actor-based in-flight request coalescing | Fork SwiftLint PASS |
-| Use stable IPA temp/zip paths | `upstream/fix-ipa-temp-paths` | `21b9a3f58629f3ae0230d88c994da468e7bae554` | Use system temporary directory and absolute `/usr/bin/zip` | Fork SwiftLint PASS |
-| Move app-icon extraction off the main actor | `upstream/perf-app-icon-loading` | `15f02e9476559a061040fd0c490ede7f93afc04f` | Cache-first icon lookup, background extraction, return TIFF `Data` across task boundary | Fork SwiftLint PASS |
+| Fix resilient per-app settings persistence | `upstream/fix-app-settings-persistence` | `4e3142bf` | Atomic plist writes, no write-back while decoding, preserve unreadable plist, retain bundle ID on reset | Fork SwiftLint PASS |
+| Stabilize and move app-library refresh off main actor | `upstream/perf-app-library-refresh` | `ca124fa6` | Background directory/plist scan, cancelled stale refreshes, atomic bundle-ID cache reconciliation, preserve `PlayApp` identity while bundle is unchanged | Fork SwiftLint PASS |
+| Sanitize copied PlayTools plugin before signing | `upstream/fix-playtools-plugin-xattrs` | `38bd8b3d` | Clear FinderInfo/resource-fork xattrs immediately before ad-hoc signing | Fork SwiftLint PASS |
+| Guarantee IPA temporary-directory cleanup | `upstream/fix-installer-temp-cleanup` | `539e8361` | `defer` cleanup covers success, early return and thrown error | Fork SwiftLint PASS |
+| Cache and deduplicate iTunes lookups | `upstream/perf-itunes-request-dedup` | `7cdf3601` | Cache-first lookup and actor-based in-flight request coalescing | Fork SwiftLint PASS |
+| Use stable IPA temp/zip paths | `upstream/fix-ipa-temp-paths` | `d26ea110` | Use system temporary directory and absolute `/usr/bin/zip` | Fork SwiftLint PASS |
+| Move app-icon extraction off the main actor | `upstream/perf-app-icon-loading` | `6e0e6a23` | Cache-first icon lookup, background extraction, return TIFF `Data` across task boundary | Fork SwiftLint PASS |
 
 The branches are pushed to `EmilyTsum/PlayCover` and can be opened as separate upstream PRs without depending on PTMC.
 
