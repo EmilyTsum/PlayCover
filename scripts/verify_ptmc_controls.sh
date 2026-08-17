@@ -35,5 +35,7 @@ grep -Fq 'end_record' "$view_file"
 grep -Fq '⌥⌘R toggles recording' "$view_file"
 grep -Fq 'PTMCGlobalHotKeyManager.shared.start(app: app, source: .interface)' "$view_file"
 grep -Fq 'PTMCGlobalHotKeyManager.shared.stop(app: app, source: .interface)' "$view_file"
+grep -Fq 'let presentPath: String' "$view_file"
+grep -Fq 'values["presentPath"] as? String' "$view_file"
 
 echo 'PTMC host controls invariants: PASS'
