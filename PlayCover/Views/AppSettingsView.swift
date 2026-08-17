@@ -1618,8 +1618,8 @@ struct MetalCaptureView: View {
                    commandSentAt.map({ pollNow.timeIntervalSince($0) > 2.0 }) == true {
                     Text(
                         "No compatible Metal presentation has been observed yet. PTMC supports Metal renderers " +
-                        "independently of engine, but the app must present a supported CAMetalDrawable/MTLCommandBuffer " +
-                        "surface using BGRA8Unorm or BGRA8Unorm_sRGB."
+                        "independently of engine, but the app must present a supported " +
+                        "CAMetalDrawable/MTLCommandBuffer surface using BGRA8Unorm or BGRA8Unorm_sRGB."
                     )
                     .font(.caption2)
                     .foregroundStyle(.orange)
