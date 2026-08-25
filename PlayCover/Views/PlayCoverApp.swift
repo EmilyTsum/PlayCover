@@ -264,7 +264,10 @@ final class PTMCGlobalHotKeyManager {
         for attempt in 0..<12 {
             do {
                 if #available(macOS 13.0, *) {
-                    try await MetalCaptureAudioRecorder.shared.start(bundleIdentifier: bundleIdentifier)
+                    try await MetalCaptureAudioRecorder.shared.start(
+                        bundleIdentifier: bundleIdentifier,
+                        audioFormat: capture.metalCaptureAudioFormat
+                    )
                     if capture.metalCaptureFeedbackSounds { MetalCaptureFeedback.playStart() }
                     Log.shared.log("PTMC autostart audio attached: \(bundleIdentifier)")
                     return

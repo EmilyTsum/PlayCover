@@ -15,6 +15,7 @@ grep -Fq 'AVEncoderBitRateKey: 256_000' "$source_file"
 grep -Fq 'AVFormatIDKey: kAudioFormatLinearPCM' "$source_file"
 grep -Fq 'AVLinearPCMBitDepthKey: 32' "$source_file"
 grep -Fq 'AVLinearPCMIsFloatKey: true' "$source_file"
+grep -Fq 'audioFormat: capture.metalCaptureAudioFormat' 'PlayCover/Views/PlayCoverApp.swift'
 grep -Fq 'drainPendingSamples' "$source_file"
 grep -Fq 'observePCMZeroRuns(sampleBuffer)' "$source_file"
 grep -Fq 'pcmZeroMaxMs=' "$source_file"
