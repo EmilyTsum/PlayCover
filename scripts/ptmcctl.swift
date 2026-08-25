@@ -97,8 +97,9 @@ private func status(_ bundle: String, compact: Bool = false) -> [String: Any] {
     print("live rates:   present \(String(format: "%.1f", presentFPS)) fps, " +
           "capture \(String(format: "%.1f", captureFPS)) fps, " +
           "encode \(String(format: "%.1f", encodedFPS)) fps")
-    print("pipeline:     inFlight=\(int(values, "inFlight"))/\(int(values, "bufferCount")) +1 burst " +
-          "pendingWrites=\(int(values, "pendingWrites")) burstUses=\(int(values, "burstSlotUses"))")
+    print("pipeline:     gpu=\(int(values, "gpuInFlight"))/\(int(values, "bufferCount")) " +
+          "VT-resident=\(int(values, "inFlight"))/\(int(values, "allocatedBufferCount")) " +
+          "pendingWrites=\(int(values, "pendingWrites")) residencyUses=\(int(values, "burstSlotUses"))")
     print("drops:        \(drops) [pool \(int(values, "droppedPool")), encoder \(int(values, "droppedEncoder")), late \(int(values, "droppedLate")), unsupported \(int(values, "unsupported"))]")
     print("EDR:          \(int(values, "edr"))")
     print("colorspace:   \(string(values, "colorSpace"))")
@@ -166,7 +167,7 @@ private func configure(_ bundle: String, options: ArraySlice<String>) throws {
             runtime["disableDisplaySync"] = flag
             app["metalCaptureDisableDisplaySync"] = flag
         case "codec":
-            let allowed = ["hevc", "prores422lt", "prores422", "prores422hq"]
+            let allowed = ["hevc", "hevc422long", "hevc422alli", "prores422lt", "prores422", "prores422hq"]
             guard allowed.contains(value.lowercased()) else { throw PTMCCLIError.message("codec: \(allowed.joined(separator: ", "))") }
             runtime["codec"] = value.lowercased()
             app["metalCaptureCodec"] = value.lowercased()

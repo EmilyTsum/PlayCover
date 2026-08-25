@@ -57,6 +57,7 @@ struct AppSettingsData: Codable {
     var metalCaptureAutostart = false
     var metalCaptureCodec = "hevc"
     var metalCaptureAudioEnabled = true
+    var metalCaptureAudioFormat = "aac"
     var metalCaptureGlobalHotkeysEnabled = true
     var metalCaptureFeedbackSounds = true
     var metalCaptureIncludeHUD = false
@@ -135,6 +136,9 @@ struct AppSettingsData: Codable {
         metalCaptureAutostart = decodeCaptureValue(Bool.self, forKey: .metalCaptureAutostart, default: false)
         metalCaptureCodec = decodeCaptureValue(String.self, forKey: .metalCaptureCodec, default: "hevc")
         metalCaptureAudioEnabled = decodeCaptureValue(Bool.self, forKey: .metalCaptureAudioEnabled, default: true)
+        metalCaptureAudioFormat = decodeCaptureValue(
+            String.self, forKey: .metalCaptureAudioFormat, default: "aac"
+        )
         metalCaptureGlobalHotkeysEnabled = decodeCaptureValue(
             Bool.self, forKey: .metalCaptureGlobalHotkeysEnabled, default: true
         )

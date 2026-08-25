@@ -6,7 +6,7 @@ This file is the first document to read for the `ptmc-nightly` branch. It record
 
 - PlayCover branch: `EmilyTsum/PlayCover:ptmc-nightly`
 - PlayTools branch: `EmilyTsum/PlayTools:metal-capture`
-- Pinned PlayTools commit: `2bd5c8664dcd07d5cc2ccc962c393ee041f10d20`
+- Pinned PlayTools commit: `0a1cad3a547fedb1bf4250d0af75789baaa8d9d0`
 - Legacy overlay repository is retained only for reproducibility; it is not the active implementation.
 
 `Cartfile.resolved` is authoritative for the PlayTools revision bundled into PlayCover. CI writes both PlayCover and PlayTools commit IDs into every DMG artifact.
@@ -127,7 +127,7 @@ These were reviewed and intentionally incorporated rather than blindly merging a
 
 ## Runtime control
 
-Per-game Capture settings are written to a PTMC runtime plist and launch environment. UI and global-hotkey Start/Stop/status use the same bundle-targeted Darwin notifications (`io.playcover.ptmc.<command>.<bundle-id>`). The game writes partial/final MOVs under PlayCover's container; PlayCover exports completed files to `~/Movies` or the chosen directory. Global shortcut and feedback-sound preferences are host-only settings and are not injected into the game process.
+Per-game Capture settings are written to a PTMC runtime plist and launch environment. The runtime plist is authoritative after launch, while launch-environment values remain the initial fallback. Consequently, codec and other capture settings can be changed while the game stays open and take effect on the next recording. The codec picker is locked during an active recording because AVAssetWriter/VideoToolbox sessions cannot change codec mid-file. UI and global-hotkey Start/Stop/status use the same bundle-targeted Darwin notifications (`io.playcover.ptmc.<command>.<bundle-id>`). The game writes partial/final MOVs under PlayCover's container; PlayCover exports completed files to `~/Movies` or the chosen directory. Global shortcut and feedback-sound preferences are host-only settings and are not injected into the game process.
 
 Per-game PlayCover settings are persisted separately under the PlayCover container. PTMC capture keys must remain backward-compatible with older fork plists: missing or stale/wrongly-typed PTMC keys decode to current defaults instead of rejecting the whole settings object. Settings writes are atomic, loading does not rewrite the plist as a side effect, Reset preserves the app bundle identifier, and an unreadable plist is copied to a sibling `.invalid.plist` before defaults replace it. This hardening was added after a real-device case where Reset made previously non-persistent PTMC controls work again; the original pre-reset plist was no longer available, so no specific corrupt key is considered proven.
 
@@ -143,7 +143,7 @@ Per-game PlayCover settings are persisted separately under the PlayCover contain
 ./scripts/ptmcctl.swift inspect com.example.game
 ```
 
-Audio remains PlayCover-host-owned because ScreenCaptureKit permission/filtering belongs to the host process.
+Audio remains PlayCover-host-owned because ScreenCaptureKit permission/filtering belongs to the host process. It can be written as 256 kbit/s AAC in an M4A sidecar or 48 kHz stereo float PCM in a MOV sidecar before passthrough muxing.
 
 ## Validation boundary
 

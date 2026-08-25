@@ -252,8 +252,10 @@ struct MetalCaptureStatus {
     let captureFPS: Double
     let encodedFPS: Double
     let inFlight: Int
+    let gpuInFlight: Int
     let pendingWrites: Int
     let bufferCount: Int
+    let allocatedBufferCount: Int
     let burstSlotUses: Int
     let codec: String
     let firstVideoHostTimeNs: UInt64
@@ -310,8 +312,10 @@ struct MetalCaptureStatus {
             captureFPS: (values["captureFPS"] as? NSNumber)?.doubleValue ?? 0,
             encodedFPS: (values["encodedFPS"] as? NSNumber)?.doubleValue ?? 0,
             inFlight: integer("inFlight"),
+            gpuInFlight: integer("gpuInFlight"),
             pendingWrites: integer("pendingWrites"),
             bufferCount: integer("bufferCount"),
+            allocatedBufferCount: integer("allocatedBufferCount"),
             burstSlotUses: integer("burstSlotUses"),
             codec: values["codec"] as? String ?? "hevc",
             firstVideoHostTimeNs: (values["firstVideoHostTimeNs"] as? NSNumber)?.uint64Value ?? 0,
@@ -342,6 +346,7 @@ extension MetalCaptureStatus {
 
 struct MetalCaptureAudioResult {
     let url: URL
+    let formatName: String
     let firstHostTimeNs: UInt64
     let droppedSamples: Int
     let peakPendingSamples: Int
@@ -378,6 +383,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
     private var writer: AVAssetWriter?
     private var writerInput: AVAssetWriterInput?
     private var outputURL: URL?
+    private var audioFormat = "aac"
     private var firstHostTimeNs: UInt64 = 0
     private var appendedSamples = 0
     private var pendingSamples: [CMSampleBuffer] = []
@@ -395,7 +401,7 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
         max(0, pendingSamples.count - pendingHead)
     }
 
-    func start(bundleIdentifier: String) async throws {
+    func start(bundleIdentifier: String, audioFormat requestedFormat: String) async throws {
         _ = await stop()
         droppedSamples = 0
         peakPendingSamples = 0
@@ -437,7 +443,9 @@ final class MetalCaptureAudioRecorder: NSObject, SCStreamOutput, SCStreamDelegat
 
         let directory = MetalCapturePaths.captureDirectory(for: bundleIdentifier)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let audioURL = directory.appendingPathComponent("PTMC-Audio-active.m4a")
+        audioFormat = requestedFormat.lowercased() == "pcm" ? "pcm" : "aac"
+        let sidecarExtension = audioFormat == "pcm" ? "mov" : "m4a"
+        let audioURL = directory.appendingPathComponent("PTMC-Audio-active.\(sidecarExtension)")
         try? FileManager.default.removeItem(at: audioURL)
 
         let captureStream = SCStream(filter: filter, configuration: configuration, delegate: self)
@@ -597,15 +605,27 @@ private extension MetalCaptureAudioRecorder {
             // (`outputSettings = nil`) is for media that is already in a compatible
             // encoded format; using it here caused v0.1.9 to finalize video-only files.
             // Keep the bounded backlog, but restore the known-good AAC writer path.
-            let assetWriter = try AVAssetWriter(outputURL: url, fileType: .m4a)
-            let selectedInput = AVAssetWriterInput(
-                mediaType: .audio,
-                outputSettings: [
+            let pcm = audioFormat == "pcm"
+            let assetWriter = try AVAssetWriter(outputURL: url, fileType: pcm ? .mov : .m4a)
+            let outputSettings: [String: Any] = pcm
+                ? [
+                    AVFormatIDKey: kAudioFormatLinearPCM,
+                    AVSampleRateKey: 48_000,
+                    AVNumberOfChannelsKey: 2,
+                    AVLinearPCMBitDepthKey: 32,
+                    AVLinearPCMIsFloatKey: true,
+                    AVLinearPCMIsBigEndianKey: false,
+                    AVLinearPCMIsNonInterleaved: false
+                ]
+                : [
                     AVFormatIDKey: kAudioFormatMPEG4AAC,
                     AVSampleRateKey: 48_000,
                     AVNumberOfChannelsKey: 2,
                     AVEncoderBitRateKey: 256_000
-                ],
+                ]
+            let selectedInput = AVAssetWriterInput(
+                mediaType: .audio,
+                outputSettings: outputSettings,
                 sourceFormatHint: formatDescription
             )
             selectedInput.expectsMediaDataInRealTime = true
@@ -713,6 +733,7 @@ private extension MetalCaptureAudioRecorder {
         let pcmRate = max(1, pcmZeroSampleRate)
         let result = MetalCaptureAudioResult(
             url: url,
+            formatName: audioFormat,
             firstHostTimeNs: firstHostTimeNs,
             droppedSamples: droppedSamples,
             peakPendingSamples: peakPendingSamples,
@@ -742,6 +763,7 @@ private extension MetalCaptureAudioRecorder {
         writer = nil
         writerInput = nil
         outputURL = nil
+        audioFormat = "aac"
         firstHostTimeNs = 0
         appendedSamples = 0
         pendingSamples.removeAll(keepingCapacity: true)
@@ -848,7 +870,10 @@ enum MetalCaptureHostWorkflow {
         if capture.metalCaptureAudioEnabled {
             if #available(macOS 13.0, *) {
                 do {
-                    try await MetalCaptureAudioRecorder.shared.start(bundleIdentifier: bundleIdentifier)
+                    try await MetalCaptureAudioRecorder.shared.start(
+                        bundleIdentifier: bundleIdentifier,
+                        audioFormat: capture.metalCaptureAudioFormat
+                    )
                     audioState = "capturing"
                 } catch {
                     audioState = "error"
@@ -906,7 +931,7 @@ enum MetalCaptureHostWorkflow {
             "pcmZeroRuns=\(audioResult.pcmZeroRunCount) " +
             "pcmZeroMs=\(String(format: "%.1f", audioResult.pcmZeroSeconds * 1000)) " +
             "pcmZeroMaxMs=\(String(format: "%.1f", audioResult.pcmZeroMaxSeconds * 1000)) " +
-            "path=AAC 256k"
+            "format=\(audioResult.formatName.uppercased())"
         )
     }
 
@@ -1259,11 +1284,30 @@ struct MetalCaptureView: View {
                         Spacer()
                         Picker("", selection: $settings.settings.metalCaptureCodec) {
                             Text("HEVC (hardware)").tag("hevc")
+                            Text("HEVC 4:2:2 Long GOP").tag("hevc422long")
+                            Text("HEVC 4:2:2 All-I").tag("hevc422alli")
                             Text("ProRes 422 LT").tag("prores422lt")
                             Text("ProRes 422").tag("prores422")
                             Text("ProRes 422 HQ").tag("prores422hq")
                         }
-                        .frame(width: 180)
+                        .frame(width: 240)
+                        .disabled(captureIsActive)
+                    }
+
+                    Text(captureIsActive
+                         ? "Stop the current recording before changing codecs."
+                         : "Codec changes take effect on the next recording without restarting the game.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if settings.settings.metalCaptureCodec.hasPrefix("hevc422") {
+                        Text(
+                            "The Metal converter supplies 8-bit 4:2:2 (422v). Apple VideoToolbox emits the " +
+                            "hardware Main 4:2:2 10 / Rext bitstream, so editors report a 10-bit pixel format " +
+                            "even though source precision is 8-bit."
+                        )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     HStack {
@@ -1319,6 +1363,25 @@ struct MetalCaptureView: View {
                             "PTMC buffers short AVAssetWriter stalls instead of dropping samples immediately."
                         )
 
+                    if settings.settings.metalCaptureAudioEnabled {
+                        HStack {
+                            Text("Audio format")
+                            Spacer()
+                            Picker("", selection: $settings.settings.metalCaptureAudioFormat) {
+                                Text("AAC 256 kbps").tag("aac")
+                                Text("PCM float 32-bit").tag("pcm")
+                            }
+                            .frame(width: 180)
+                        }
+                        Text(
+                            settings.settings.metalCaptureAudioFormat == "pcm"
+                                ? "PCM preserves ScreenCaptureKit's 48 kHz stereo float samples (about 23 MB/min)."
+                                : "AAC uses 256 kbps (about 1.9 MB/min)."
+                        )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     Toggle("Include Metal HUD in recording", isOn: $settings.settings.metalCaptureIncludeHUD)
                         .help(
                             "Off by default. PTMC temporarily hides the target CAMetalLayer's Metal Performance HUD " +
@@ -1336,7 +1399,7 @@ struct MetalCaptureView: View {
                         }
                     }
 
-                    if settings.settings.metalCaptureCodec == "hevc" {
+                    if settings.settings.metalCaptureCodec.hasPrefix("hevc") {
                         HStack {
                             Text("HEVC bitrate")
                             Spacer()
@@ -1356,7 +1419,7 @@ struct MetalCaptureView: View {
                     }
 
                     HStack {
-                        Text("Capture buffer slots")
+                        Text("Maximum GPU captures in flight")
                         Spacer()
                         Stepper(value: $settings.settings.metalCaptureBuffers, in: 3...16) {
                             Text("\(settings.settings.metalCaptureBuffers)")
@@ -1365,9 +1428,9 @@ struct MetalCaptureView: View {
                         }
                     }
                     Text(
-                        "3 is recommended for low-latency capture. PTMC also keeps one cooldown-limited emergency " +
-                        "slot for isolated encoder latency spikes; increasing the regular ring can raise 4K " +
-                        "GPU/unified-memory pressure."
+                        "3 is recommended for low-latency capture. PTMC separately preallocates three additional " +
+                        "IOSurfaces for VideoToolbox residency, so encoder latency no longer deepens the GPU work " +
+                        "queue. Increase this only when GPU completion itself is falling behind."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1652,8 +1715,9 @@ struct MetalCaptureView: View {
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
                 Text(
-                    "pipeline: raw in-flight \(status.inFlight)/\(status.bufferCount) regular (+1 burst) • " +
-                    "compressed pending \(status.pendingWrites) • burst recoveries \(status.burstSlotUses) • " +
+                    "pipeline: GPU \(status.gpuInFlight)/\(status.bufferCount) • " +
+                    "VT-resident raw \(status.inFlight)/\(status.allocatedBufferCount) • " +
+                    "compressed pending \(status.pendingWrites) • residency recoveries \(status.burstSlotUses) • " +
                     "present skips \(status.skippedPresents)"
                 )
                 .font(.caption2.monospacedDigit())
