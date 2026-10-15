@@ -75,6 +75,9 @@ jobs:
       - name: Validate PTMC host controls invariants
         run: scripts/verify_ptmc_controls.sh
 
+      - name: Validate trace summaries
+        run: python3 scripts/test_ptmc_trace_summary.py
+
       - name: Build PlayCover PTMC
         shell: bash
         run: |

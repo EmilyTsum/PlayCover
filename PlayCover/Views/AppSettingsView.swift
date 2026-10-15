@@ -247,6 +247,11 @@ struct MetalCaptureStatus {
     let droppedLate: Int
     let presentGapsOverBudget: Int
     let maxPresentGapUs: Int
+    let maxCaptureHookUs: Int
+    let maxPresentCallUs: Int
+    let droppedGPU: Int
+    let droppedResidency: Int
+    let pendingWriteBytes: Int
     let unsupported: Int
     let skippedRate: Int
     let samplingSkipPerSecond: Double
@@ -309,6 +314,11 @@ struct MetalCaptureStatus {
             droppedLate: integer("droppedLate"),
             presentGapsOverBudget: integer("presentGapsOverBudget"),
             maxPresentGapUs: integer("maxPresentGapUs"),
+            maxCaptureHookUs: integer("maxCaptureHookUs"),
+            maxPresentCallUs: integer("maxPresentCallUs"),
+            droppedGPU: integer("droppedGPU"),
+            droppedResidency: integer("droppedResidency"),
+            pendingWriteBytes: integer("pendingWriteBytes"),
             unsupported: integer("unsupported"),
             skippedRate: integer("samplingSkipped"),
             samplingSkipPerSecond: (values["samplingSkipPerSecond"] as? NSNumber)?.doubleValue ?? 0,
@@ -1432,9 +1442,10 @@ struct MetalCaptureView: View {
                         }
                     }
                     Text(
-                        "3 is recommended for low-latency capture. PTMC separately preallocates three additional " +
-                        "IOSurfaces for VideoToolbox residency, so encoder latency no longer deepens the GPU work " +
-                        "queue. Increase this only when GPU completion itself is falling behind."
+                        "3 is recommended for low-latency capture. PTMC separately preallocates a bounded " +
+                        "75 ms reserve of IOSurfaces for VideoToolbox residency, without deepening the GPU queue. " +
+                        "Higher capture FPS uses more raw-buffer memory. Increase the GPU limit only when " +
+                        "GPU completion itself is falling behind."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1704,6 +1715,14 @@ struct MetalCaptureView: View {
                     .foregroundStyle(.orange)
                 }
                 if status.presented > 1 {
+                    Text("pool drops: GPU busy \(status.droppedGPU) • encoder residency \(status.droppedResidency) • " +
+                         "compressed backlog \(String(format: "%.1f", Double(status.pendingWriteBytes) / 1_048_576)) MiB")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Text("peak CPU calls: capture \(String(format: "%.2f", Double(status.maxCaptureHookUs) / 1000)) ms • " +
+                         "native present \(String(format: "%.2f", Double(status.maxPresentCallUs) / 1000)) ms")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
                     Text("present pacing: \(status.presentGapsOverBudget) gaps above 1.5× source cadence • " +
                          "largest \(String(format: "%.2f", Double(status.maxPresentGapUs) / 1000)) ms")
                         .font(.caption2.monospacedDigit())

@@ -4,9 +4,9 @@ This file is the first document to read for the `ptmc-nightly` branch. It record
 
 ## Current source pins
 
-- PlayCover branch: `EmilyTsum/PlayCover:ptmc-nightly`
-- PlayTools branch: `EmilyTsum/PlayTools:metal-capture`
-- Pinned PlayTools commit: `d7dc431515593c8adfd2ddd001da6f53dab2c2b5`
+- Experimental PlayCover branch: `EmilyTsum/PlayCover:feat/ptmc-4-preview-20261015` (production line remains `ptmc-nightly`)
+- Experimental PlayTools branch: `EmilyTsum/PlayTools:feat/ptmc-4-preview-20261015` (production line remains `metal-capture`)
+- Pinned PlayTools commit: `f13eb271a9d81df4fcbab045092aa55193b2993b`
 - Legacy overlay repository is retained only for reproducibility; it is not the active implementation.
 - October 2026 preview-port branch starts at official PlayCover `develop` commit `c8cf79f` (after the `4.0.0-prerelease` release), with PlayTools ported from current upstream `master` `fbc8880`. This remains an experimental fork build, not an official PlayCover 4.0 package.
 
@@ -48,7 +48,7 @@ VideoToolbox submission uses a dedicated user-initiated serial queue. Compressed
 
 ## 4K frame pacing / backpressure
 
-The normal GPU capture concurrency defaults to 3. The runtime preallocates three additional IOSurface slots for VideoToolbox residency, while `_gpuInFlight` limits GPU submissions to `bufferCount`. This decouples VideoToolbox-held raw frames from the live GPU queue; `burstSlotUses` now counts extra-slot residency rather than cooldown recovery.
+The normal GPU capture concurrency defaults to 3. The runtime preallocates `max(3, ceil(fps * 0.075))` additional IOSurface slots for VideoToolbox residency (five at 60 fps, nine at 120 fps), while `_gpuInFlight` limits GPU submissions to `bufferCount`. This decouples VideoToolbox-held raw frames from the live GPU queue; `burstSlotUses` now counts extra-slot residency rather than cooldown recovery.
 
 The sampler distinguishes near-target jitter from real rate conversion. If the measured source cadence is effectively the requested capture rate, every present is accepted so small 60 Hz timing error does not become a 1/2-frame hole. When the source is clearly faster, PTMC uses a phase-preserving deadline sampler (for example 120 -> 60).
 
@@ -183,3 +183,37 @@ display sync on, visible preview with low-latency mode, and fully transparent ou
 A present-cadence gap does not by itself prove compositor latency; confirm with Metal
 System Trace/Instruments when a visible-preview difference persists. Do not enable
 `skipDisplayPresent` by default: unpresented CAMetalDrawable reuse is unsafe.
+
+## October 15 follow-up: writer ownership and measurement
+
+The main target application for acceptance testing is **ミリシタ / THE iDOLM@STER Million Live!
+Theater Days** (`jp.co.bandainamcoent.BNEI0310`). Use a repeatable MV, fixed idols/outfits,
+camera/graphics settings and the same audio mode for the 4K60/120 preview comparison.
+The direct CAMetalDrawable route observed in this title is a required test path; a native
+command-buffer smoke test does not establish translated Unity game performance.
+
+The follow-up runtime bounds compressed writes at 64 frames / 64 MiB and fixes final-frame
+ownership during Stop. Control notifications, preparation, delayed hook discovery and heartbeat
+work are serialized; discovery skips idle recordings and clamps class enumeration to allocated
+capacity. Nested native present selectors are forwarded normally but captured once. Finalized
+and error status is retained while idle. Native-size sRGB HEVC conversion can reuse a storage
+view to avoid decode/re-encode work; scaled interpolation and all existing codec choices remain.
+The host displays CPU-call peaks and separates GPU admission drops from encoder-residency drops.
+
+Detailed implementation, local synthetic GPU/codec evidence and remaining acceptance steps:
+[PlayTools validation document](https://github.com/EmilyTsum/PlayTools/blob/feat/ptmc-4-preview-20261015/docs/PTMC/PREVIEW_VALIDATION_20261015.md).
+Independent lightweight preview is not implemented and the reported ミリシタ visible-preview
+stall is not claimed fixed. These PRs remain experimental; production branches/releases are
+not replaced.
+
+Collect heartbeat snapshots without changing runtime presentation settings:
+
+```sh
+./scripts/ptmcctl.swift trace jp.co.bandainamcoent.BNEI0310 60 NEW-visible-4k60.jsonl visible-4k60
+python3 scripts/ptmc_trace_summary.py NEW-visible-4k60.jsonl
+```
+
+Start/stop through PlayCover for app audio; `trace` only observes the status file, and refuses
+to overwrite an existing trace. It records status age, generation, configuration and thermal
+state. The summary deduplicates heartbeats, separates generations, reports stale/missing data
+and rejects counter-reset windows. `scripts/test_ptmc_trace_summary.py` covers those cases.
