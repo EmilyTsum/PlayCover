@@ -6,7 +6,7 @@ This file is the first document to read for the `ptmc-nightly` branch. It record
 
 - Experimental PlayCover branch: `EmilyTsum/PlayCover:feat/ptmc-4-preview-20261015` (production line remains `ptmc-nightly`)
 - Experimental PlayTools branch: `EmilyTsum/PlayTools:feat/ptmc-4-preview-20261015` (production line remains `metal-capture`)
-- Pinned PlayTools commit: `f13eb271a9d81df4fcbab045092aa55193b2993b`
+- Pinned PlayTools commit: `50795b6ae425c2e4f1f30f9c4caf88ee87ccafde`
 - Legacy overlay repository is retained only for reproducibility; it is not the active implementation.
 - October 2026 preview-port branch starts at official PlayCover `develop` commit `c8cf79f` (after the `4.0.0-prerelease` release), with PlayTools ported from current upstream `master` `fbc8880`. This remains an experimental fork build, not an official PlayCover 4.0 package.
 
