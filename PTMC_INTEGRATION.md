@@ -6,7 +6,7 @@ This file is the first document to read for the `ptmc-nightly` branch. It record
 
 - Experimental PlayCover branch: `EmilyTsum/PlayCover:feat/ptmc-4-preview-20261015` (production line remains `ptmc-nightly`)
 - Experimental PlayTools branch: `EmilyTsum/PlayTools:feat/ptmc-4-preview-20261015` (production line remains `metal-capture`)
-- Pinned PlayTools commit: `50795b6ae425c2e4f1f30f9c4caf88ee87ccafde`
+- Pinned PlayTools commit: `ab5c57f2b841640f03fbbce08d1a44e8af5c858a`
 - Legacy overlay repository is retained only for reproducibility; it is not the active implementation.
 - October 2026 preview-port branch starts at official PlayCover `develop` commit `c8cf79f` (after the `4.0.0-prerelease` release), with PlayTools ported from current upstream `master` `fbc8880`. This remains an experimental fork build, not an official PlayCover 4.0 package.
 
@@ -217,3 +217,9 @@ Start/stop through PlayCover for app audio; `trace` only observes the status fil
 to overwrite an existing trace. It records status age, generation, configuration and thermal
 state. The summary deduplicates heartbeats, separates generations, reports stale/missing data
 and rejects counter-reset windows. `scripts/test_ptmc_trace_summary.py` covers those cases.
+
+A short real ミリシタ MV smoke on Apple M5 captured/wrote 1190/1190 frames at visible
+3840x2160 HEVC 4:2:2/60 with no pool/encoder drops. This was video-only, with a process-local
+framework override and the existing installed AKInterface plugin. It does not establish
+sustained performance, 120 fps, A/V sync or full new-installation parity. Full evidence and
+remaining acceptance conditions are in the linked PlayTools validation document.
