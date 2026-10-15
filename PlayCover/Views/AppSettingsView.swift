@@ -1716,10 +1716,12 @@ struct MetalCaptureView: View {
                 }
                 if status.presented > 1 {
                     Text("pool drops: GPU busy \(status.droppedGPU) • encoder residency \(status.droppedResidency) • " +
-                         "compressed backlog \(String(format: "%.1f", Double(status.pendingWriteBytes) / 1_048_576)) MiB")
+                         "compressed backlog " +
+                         "\(String(format: "%.1f", Double(status.pendingWriteBytes) / 1_048_576)) MiB")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
-                    Text("peak CPU calls: capture \(String(format: "%.2f", Double(status.maxCaptureHookUs) / 1000)) ms • " +
+                    Text("peak CPU calls: capture " +
+                         "\(String(format: "%.2f", Double(status.maxCaptureHookUs) / 1000)) ms • " +
                          "native present \(String(format: "%.2f", Double(status.maxPresentCallUs) / 1000)) ms")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
