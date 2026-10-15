@@ -3,6 +3,8 @@ name: PTMC ad-hoc nightly
 on:
   push:
     branches: [ptmc-nightly]
+  pull_request:
+    branches: [ptmc-nightly]
   workflow_dispatch:
   schedule:
     - cron: "45 19 * * *"
