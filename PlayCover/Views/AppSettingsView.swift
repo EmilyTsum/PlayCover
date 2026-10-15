@@ -1715,7 +1715,8 @@ struct MetalCaptureView: View {
                     .foregroundStyle(.orange)
                 }
                 if status.presented > 1 {
-                    Text("pool drops: GPU busy \(status.droppedGPU) • encoder residency \(status.droppedResidency) • " +
+                    Text("pool drops: GPU busy \(status.droppedGPU) • " +
+                         "encoder residency \(status.droppedResidency) • " +
                          "compressed backlog " +
                          "\(String(format: "%.1f", Double(status.pendingWriteBytes) / 1_048_576)) MiB")
                         .font(.caption2.monospacedDigit())
