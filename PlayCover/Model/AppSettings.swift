@@ -70,6 +70,7 @@ struct AppSettingsData: Codable {
     var metalCaptureBitrateMbps = 120
     var metalCaptureBuffers = 3
     var metalCaptureLogInterval = 1.0
+    var metalCaptureIndependentPreview = false
     var metalCaptureDisableDisplaySync = false
     var metalCaptureForceSDRDisplay = true
     var metalCaptureSpoofMaxFPS = 0
@@ -165,6 +166,9 @@ struct AppSettingsData: Codable {
         metalCaptureBitrateMbps = decodeCaptureValue(Int.self, forKey: .metalCaptureBitrateMbps, default: 120)
         metalCaptureBuffers = decodeCaptureValue(Int.self, forKey: .metalCaptureBuffers, default: 3)
         metalCaptureLogInterval = decodeCaptureValue(Double.self, forKey: .metalCaptureLogInterval, default: 1.0)
+        metalCaptureIndependentPreview = decodeCaptureValue(
+            Bool.self, forKey: .metalCaptureIndependentPreview, default: false
+        )
         metalCaptureDisableDisplaySync = decodeCaptureValue(
             Bool.self, forKey: .metalCaptureDisableDisplaySync, default: false
         )

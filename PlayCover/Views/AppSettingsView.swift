@@ -272,6 +272,10 @@ struct MetalCaptureStatus {
     let presentHookCount: Int
     let presentPath: String
     let captureEnabled: Bool
+    let independentPreviewRequested: Bool
+    let independentPreviewActive: Bool
+    let previewPresented: Int
+    let previewSkipped: Int
     let displaySuppressed: Bool
     let displayPresentSkipped: Bool
     let includeMetalHUDInCapture: Bool
@@ -339,6 +343,10 @@ struct MetalCaptureStatus {
             presentHookCount: integer("presentHookCount"),
             presentPath: values["presentPath"] as? String ?? "undetermined",
             captureEnabled: (values["captureEnabled"] as? NSNumber)?.boolValue ?? false,
+            independentPreviewRequested: (values["independentPreviewRequested"] as? NSNumber)?.boolValue ?? false,
+            independentPreviewActive: (values["independentPreviewActive"] as? NSNumber)?.boolValue ?? false,
+            previewPresented: integer("previewPresented"),
+            previewSkipped: integer("previewSkipped"),
             displaySuppressed: (values["displaySuppressed"] as? NSNumber)?.boolValue ?? false,
             displayPresentSkipped: (values["displayPresentSkipped"] as? NSNumber)?.boolValue ?? false,
             includeMetalHUDInCapture: (values["includeMetalHUDInCapture"] as? NSNumber)?.boolValue ?? false,
@@ -1462,15 +1470,21 @@ struct MetalCaptureView: View {
 
                     Divider()
 
-                    Button("Enable visible low-latency preview") {
+                    Button("Enable independent preview (experimental)") {
                         // Keep native drawable recycling; never silently enable unsafe headless present.
                         settings.settings.metalCaptureSuppressDisplayOutput = false
                         settings.settings.metalCaptureSkipDisplayPresent = false
-                        settings.settings.metalCaptureDisableDisplaySync = true
+                        settings.settings.metalCaptureIndependentPreview = true
+                        settings.settings.metalCaptureDisableDisplaySync = false
                         syncRuntimeConfiguration(command: "status")
                     }
-                    .help("Shows the game while recording and experiments with display sync off. " +
-                          "This can reduce present stalls, but may raise GPU usage; compare pacing counters.")
+                    .help("Opens a separate Metal preview window at up to 720p/60 while recording at full quality. " +
+                          "Preview stalls drop preview frames only. Takes effect on the next recording.")
+
+                    Toggle("Independent preview (up to 720p/60, experimental)",
+                           isOn: $settings.settings.metalCaptureIndependentPreview)
+                        .help("Keeps native drawable recycling and uses a bounded separate display queue. " +
+                              "Recording quality is unchanged. Stop recording to restore the game view for navigation.")
 
                     Toggle("Low-latency preview (disable display synchronization)",
                            isOn: $settings.settings.metalCaptureDisableDisplaySync)
@@ -1625,6 +1639,9 @@ struct MetalCaptureView: View {
         .onChange(of: settings.settings.metalCaptureIncludeHUD) { _ in
             syncRuntimeConfiguration(command: "status")
         }
+        .onChange(of: settings.settings.metalCaptureIndependentPreview) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
         .onChange(of: settings.settings.metalCaptureDisableDisplaySync) { _ in
             syncRuntimeConfiguration(command: "status")
         }
@@ -1739,6 +1756,13 @@ struct MetalCaptureView: View {
                     )
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                }
+                if status.independentPreviewRequested {
+                    Text("Independent preview: " +
+                         (status.independentPreviewActive ? "active" : "native display / stopped") +
+                         " • shown \(status.previewPresented) • preview skips \(status.previewSkipped)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
                 Text("SDR gate \(status.captureEnabled ? "enabled" : "disabled") • " +
                      "EDR \(status.edr == 1 ? "on" : "off") • colorspace \(status.colorSpace)")

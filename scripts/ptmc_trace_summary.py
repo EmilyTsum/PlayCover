@@ -3,7 +3,7 @@
 import argparse, json
 from pathlib import Path
 COUNTERS = ('presented','captured','encoded','presentGapsOverBudget','droppedPool','droppedGPU',
-            'droppedResidency','droppedEncoder','droppedLate','samplingSkipped','nativeLinearViewFrames')
+            'droppedResidency','droppedEncoder','droppedLate','samplingSkipped','nativeLinearViewFrames','previewSubmitted','previewPresented','previewSkipped')
 PEAKS = ('maxPresentGapUs','maxCaptureHookUs','maxPresentCallUs','lastOwnedCaptureGPUTimeUs',
          'lastOwnedCaptureCompletionUs','maxEncoderQueueUs','maxVTCallbackUs','pendingWritesHighWater','pendingWriteBytes')
 def summarize(path):
@@ -31,7 +31,7 @@ def summarize(path):
         valid = elapsed > 0 and not resets
         report['generations'].append({'generation':generation, 'samples':len(samples), 'elapsedSeconds':elapsed,
             'validCounterWindow':valid, 'counterResets':resets, 'delta':deltas,
-            'rates':{k:deltas[k]/elapsed for k in ('presented','captured','encoded') if valid and k in deltas},
+            'rates':{k:deltas[k]/elapsed for k in ('presented','captured','encoded','previewPresented') if valid and k in deltas},
             'peaks':{k:max(s[k] for s in samples if k in s) for k in PEAKS if any(k in s for s in samples)},
             'presentationModes':sorted({(s.get('displaySync'),s.get('displaySuppressed'),s.get('displayPresentSkipped')) for s in samples},key=str)})
     return report

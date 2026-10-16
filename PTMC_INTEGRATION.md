@@ -6,7 +6,7 @@ This file is the first document to read for the `ptmc-nightly` branch. It record
 
 - Experimental PlayCover branch: `EmilyTsum/PlayCover:feat/ptmc-4-preview-20261015` (production line remains `ptmc-nightly`)
 - Experimental PlayTools branch: `EmilyTsum/PlayTools:feat/ptmc-4-preview-20261015` (production line remains `metal-capture`)
-- Pinned PlayTools commit: `ab5c57f2b841640f03fbbce08d1a44e8af5c858a`
+- Pinned PlayTools commit: `d14150c5073fc47cf8ad21f746019524a37088d0`
 - Legacy overlay repository is retained only for reproducibility; it is not the active implementation.
 - October 2026 preview-port branch starts at official PlayCover `develop` commit `c8cf79f` (after the `4.0.0-prerelease` release), with PlayTools ported from current upstream `master` `fbc8880`. This remains an experimental fork build, not an official PlayCover 4.0 package.
 
@@ -223,3 +223,17 @@ A short real ミリシタ MV smoke on Apple M5 captured/wrote 1190/1190 frames a
 framework override and the existing installed AKInterface plugin. It does not establish
 sustained performance, 120 fps, A/V sync or full new-installation parity. Full evidence and
 remaining acceptance conditions are in the linked PlayTools validation document.
+
+## Independent preview window (2026-10-16, experimental)
+
+The capture settings now expose a separate preview window (at most 1280x720/60),
+with recording resolution, codec and target FPS unchanged. A three-texture mailbox
+and separate Metal display queue isolate preview drawable stalls. Original game
+drawables still present; the full-resolution game layer becomes transparent only
+while preview work is healthy, then restores on Stop or preview timeout.
+
+The preview window is display-only. Stop before navigating the original game view.
+This is opt-in and does not replace the old display-sync experiment automatically.
+Synthetic 4K60 and two-second preview-stall tests passed without capture pool or
+encoder drops. Matched MLTD MV performance and long recordings remain unverified.
+See PlayTools docs/PTMC/INDEPENDENT_PREVIEW.md for architecture and limitations.

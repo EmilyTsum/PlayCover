@@ -38,7 +38,7 @@ grep -Fq 'PTMCGlobalHotKeyManager.shared.stop(app: app, source: .interface)' "$v
 grep -Fq 'let presentPath: String' "$view_file"
 grep -Fq 'let presentGapsOverBudget: Int' "$view_file"
 grep -Fq 'let maxPresentGapUs: Int' "$view_file"
-grep -Fq 'Enable visible low-latency preview' "$view_file"
+grep -Fq 'Enable independent preview (experimental)' "$view_file"
 grep -Fq 'values["presentPath"] as? String' "$view_file"
 
 echo 'PTMC host controls invariants: PASS'
