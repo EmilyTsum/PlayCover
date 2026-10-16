@@ -101,6 +101,13 @@ private func status(_ bundle: String, compact: Bool = false) -> [String: Any] {
           "VT-resident=\(int(values, "inFlight"))/\(int(values, "allocatedBufferCount")) " +
           "pendingWrites=\(int(values, "pendingWrites")) residencyUses=\(int(values, "burstSlotUses"))")
     print("drops:        \(drops) [pool \(int(values, "droppedPool")), encoder \(int(values, "droppedEncoder")), late \(int(values, "droppedLate")), unsupported \(int(values, "unsupported"))]")
+    print("pacing:       gaps=\(int(values, "presentGapsOverBudget")) maxGapUs=\(int(values, "maxPresentGapUs")) " +
+          "maxHookUs=\(int(values, "maxCaptureHookUs")) maxPresentCallUs=\(int(values, "maxPresentCallUs"))")
+    print("pressure:     GPU drops=\(int(values, "droppedGPU")) raw-residency drops=\(int(values, "droppedResidency")) " +
+          "writeBytes=\(int(values, "pendingWriteBytes")) writeHighWater=\(int(values, "pendingWritesHighWater"))")
+    print("latency:      encoderQueueUs=\(int(values, "lastEncoderQueueUs")) max=\(int(values, "maxEncoderQueueUs")) " +
+          "VTCallbackUs=\(int(values, "lastVTCallbackUs")) max=\(int(values, "maxVTCallbackUs"))")
+    print("native sRGB view frames: \(int(values, "nativeLinearViewFrames"))")
     print("EDR:          \(int(values, "edr"))")
     print("colorspace:   \(string(values, "colorSpace"))")
     print("displaySync:  \(int(values, "displaySync"))")
@@ -111,6 +118,41 @@ private func status(_ bundle: String, compact: Bool = false) -> [String: Any] {
         print("updated:      \(ISO8601DateFormatter().string(from: date))")
     }
     return values
+}
+
+// Observe heartbeat files without sending runtime notifications or changing game settings.
+private func trace(_ bundle: String, seconds: Double, output: String, label: String) throws {
+    let url = URL(fileURLWithPath: output)
+    try Data().write(to: url, options: .withoutOverwriting)
+    let handle = try FileHandle(forWritingTo: url)
+    defer { try? handle.close() }
+    func append(_ row: [String: Any]) throws {
+        var data = try JSONSerialization.data(withJSONObject: row, options: [.sortedKeys])
+        data.append(0x0a)
+        try handle.write(contentsOf: data)
+    }
+    try append([
+        "schema": 1, "kind": "metadata", "bundle": bundle, "label": label,
+        "os": ProcessInfo.processInfo.operatingSystemVersionString,
+        "physicalMemory": ProcessInfo.processInfo.physicalMemory,
+        "configuration": readPlist(configURL(bundle))
+    ])
+    let deadline = ProcessInfo.processInfo.systemUptime + seconds
+    repeat {
+        let current = readPlist(statusURL(bundle))
+        let now = Date().timeIntervalSince1970
+        let updated = (current["timestamp"] as? NSNumber)?.doubleValue
+        try append([
+            "kind": "sample", "sampledAt": now,
+            "statusAgeSeconds": updated.map { now - $0 } ?? -1,
+            "thermalState": ProcessInfo.processInfo.thermalState.rawValue,
+            "status": current
+        ])
+        let remaining = deadline - ProcessInfo.processInfo.systemUptime
+        if remaining <= 0 { break }
+        Thread.sleep(forTimeInterval: min(1, remaining))
+    } while true
+    print("Saved PTMC trace: \(url.path)")
 }
 
 private func post(_ command: String, bundle: String) {
@@ -278,6 +320,7 @@ private func usage() -> Never {
       config  <bundle-id> [fps=120 bitrateMbps=120 buffers=6 codec=hevc]
                           [resolution=source|2160p|1440p|1080p|720p|custom width=1920 height=1080]
                           [forceSDR=true disableSync=false suppressDisplay=false skipPresent=false includeHUD=false]
+      trace   <bundle-id> <seconds> <new-output.jsonl> [trial-label]
       inspect <bundle-id>
 
     `record` controls the in-game PTMC video runtime. Game-audio capture is owned by the PlayCover UI
@@ -315,12 +358,18 @@ do {
         for _ in 0..<80 {
             Thread.sleep(forTimeInterval: 0.25)
             let current = readPlist(statusURL(bundle))
-            if string(current, "phase") == "finalized" || string(current, "phase") == "stopped" { break }
+            if string(current, "phase") == "finalized" || string(current, "phase") == "stopped" || string(current, "phase") == "error" { break }
         }
         _ = status(bundle)
         inspect(bundle)
     case "config":
         try configure(bundle, options: args.dropFirst(3))
+    case "trace":
+        guard args.count >= 5, let seconds = Double(args[3]), seconds.isFinite,
+              seconds > 0, seconds <= 86400 else {
+            throw PTMCCLIError.message("trace requires seconds in (0, 86400] and a new output path")
+        }
+        try trace(bundle, seconds: seconds, output: args[4], label: args.count > 5 ? args[5] : "unlabelled")
     case "inspect":
         inspect(bundle)
     default:

@@ -4,10 +4,11 @@ This file is the first document to read for the `ptmc-nightly` branch. It record
 
 ## Current source pins
 
-- PlayCover branch: `EmilyTsum/PlayCover:ptmc-nightly`
-- PlayTools branch: `EmilyTsum/PlayTools:metal-capture`
-- Pinned PlayTools commit: `0a1cad3a547fedb1bf4250d0af75789baaa8d9d0`
+- Experimental PlayCover branch: `EmilyTsum/PlayCover:feat/ptmc-4-preview-20261015` (production line remains `ptmc-nightly`)
+- Experimental PlayTools branch: `EmilyTsum/PlayTools:feat/ptmc-4-preview-20261015` (production line remains `metal-capture`)
+- Pinned PlayTools commit: `2e9ea6e192eb23b3e6467e48a8a54026cba75853`
 - Legacy overlay repository is retained only for reproducibility; it is not the active implementation.
+- October 2026 preview-port branch starts at official PlayCover `develop` commit `c8cf79f` (after the `4.0.0-prerelease` release), with PlayTools ported from current upstream `master` `fbc8880`. This remains an experimental fork build, not an official PlayCover 4.0 package.
 
 `Cartfile.resolved` is authoritative for the PlayTools revision bundled into PlayCover. CI writes both PlayCover and PlayTools commit IDs into every DMG artifact.
 
@@ -37,7 +38,7 @@ Current capture-format support is still intentionally narrow: the presented draw
 
 ## GPU / encoder path
 
-HEVC uses a 2x2 Metal compute kernel that converts BGRA directly into IOSurface-backed BT.709 video-range NV12. Scaling, when requested, is folded into that GPU conversion. VideoToolbox hardware acceleration is required, real-time mode is enabled, and frame reordering is disabled.
+HEVC 4:2:0 uses a 2x2 Metal compute kernel that converts BGRA directly into IOSurface-backed BT.709 video-range NV12. HEVC 4:2:2 Long GOP and All-I use NV16, with the existing hardware 4:2:2 encoder pathway retained from the PTMC base. Scaling, when requested, is folded into that GPU conversion. VideoToolbox hardware acceleration is required, real-time mode is enabled, and frame reordering is disabled.
 
 ProRes 422 LT / 422 / 422 HQ use IOSurface-backed BGRA buffers. Native-size capture is a direct Metal blit; scaled capture uses a Metal compute copy directly into the encoder buffer. There is no intermediate CPU image.
 
@@ -47,11 +48,11 @@ VideoToolbox submission uses a dedicated user-initiated serial queue. Compressed
 
 ## 4K frame pacing / backpressure
 
-The normal raw ring defaults to 3 slots. A single additional preallocated emergency slot is cooldown-limited to absorb isolated encoder-latency spikes without turning the capture pipeline into a deep queue. `burstSlotUses` reports those recoveries.
+The normal GPU capture concurrency defaults to 3. The runtime preallocates `max(3, ceil(fps * 0.075))` additional IOSurface slots for VideoToolbox residency (five at 60 fps, nine at 120 fps), while `_gpuInFlight` limits GPU submissions to `bufferCount`. This decouples VideoToolbox-held raw frames from the live GPU queue; `burstSlotUses` now counts extra-slot residency rather than cooldown recovery.
 
 The sampler distinguishes near-target jitter from real rate conversion. If the measured source cadence is effectively the requested capture rate, every present is accepted so small 60 Hz timing error does not become a 1/2-frame hole. When the source is clearly faster, PTMC uses a phase-preserving deadline sampler (for example 120 -> 60).
 
-`samplingSkipped` is intentional target-FPS filtering, not an encoder failure. Runtime status exposes present/capture/encode FPS, sampling skips/s, raw in-flight frames, compressed pending writes, pool/encoder/late drops, burst recoveries, and owned capture-command timing.
+`samplingSkipped` is intentional target-FPS filtering, not an encoder failure. Runtime status exposes present/capture/encode FPS, sampling skips/s, GPU in-flight frames, encoder-resident raw slots, compressed pending writes, pool/encoder/late drops, extra-slot residency counts, and owned capture-command timing.
 
 The remaining user-reported target to validate on hardware is rare ~1–2 frame loss around 4K60. CI cannot prove this is eliminated; inspect the runtime counters on the user's Mac before making that claim.
 
@@ -73,7 +74,7 @@ PlayTools also includes upstream PR #229's fix that preserves the system Metal H
 
 ## Audio
 
-PlayCover captures only the selected game's audio using ScreenCaptureKit application audio at 48 kHz stereo. It writes a temporary sidecar, then muxes it into the finalized PTMC MOV using the first video/audio host-time measurements and a passthrough AVAssetExportSession. No ScreenCaptureKit video output is subscribed. During recording, ScreenCaptureKit PCM samples are encoded to a 48 kHz stereo AAC sidecar using the known-good AVAssetWriter path, while a bounded 512-sample backlog absorbs short writer stalls and is flushed before finalization. Do not use `outputSettings = nil` for these ScreenCaptureKit PCM buffers: that mode caused the v0.1.9 video-only audio regression. v0.1.10 real-device evidence showed periodic tens-of-milliseconds zero-filled PCM despite continuous source PTS and zero writer drops/backpressure; the audio-only SCK configuration therefore keeps its tiny 2x2 internal screen work but uses a 1/60 minimum frame interval instead of the previous 1 fps throttle, with queue depth 8. Diagnostics now record writer drops, queue high-water mark, backpressure transitions, source-timestamp gaps, and >=10 ms near-zero PCM runs (`pcmZeroRuns`, total `pcmZeroMs`, and `pcmZeroMaxMs`). These zero-run counters are evidence of silence in the delivered PCM, not by themselves proof that ScreenCaptureKit synthesized the silence. Before muxing, PlayCover checks that the target volume has enough free space for the second passthrough movie plus a 1 GiB reserve; failed muxes preserve both the original video and audio sidecar. A completed mux is re-opened and required to contain both video and audio tracks before it can replace the original. The temporary `video-only.tmp.mov` step is a same-volume rename, not a third full copy, so an APFS clone is not useful for that replacement step; the dominant temporary allocation is the newly exported muxed movie itself.
+PlayCover captures only the selected game's audio using ScreenCaptureKit application audio at 48 kHz stereo. It writes a temporary sidecar, then muxes it into the finalized PTMC MOV using the first video/audio host-time measurements and a passthrough AVAssetExportSession. No ScreenCaptureKit video output is subscribed. During recording, ScreenCaptureKit PCM samples are encoded to a 48 kHz stereo AAC sidecar (or optional 32-bit float PCM MOV sidecar) using the known-good AVAssetWriter path, while a bounded 512-sample backlog absorbs short writer stalls and is flushed before finalization. Do not use `outputSettings = nil` for these ScreenCaptureKit PCM buffers: that mode caused the v0.1.9 video-only audio regression. v0.1.10 real-device evidence showed periodic tens-of-milliseconds zero-filled PCM despite continuous source PTS and zero writer drops/backpressure; the audio-only SCK configuration therefore keeps its tiny 2x2 internal screen work but uses a 1/60 minimum frame interval instead of the previous 1 fps throttle, with queue depth 8. Diagnostics now record writer drops, queue high-water mark, backpressure transitions, source-timestamp gaps, and >=10 ms near-zero PCM runs (`pcmZeroRuns`, total `pcmZeroMs`, and `pcmZeroMaxMs`). These zero-run counters are evidence of silence in the delivered PCM, not by themselves proof that ScreenCaptureKit synthesized the silence. Before muxing, PlayCover checks that the target volume has enough free space for the second passthrough movie plus a 1 GiB reserve; failed muxes preserve both the original video and audio sidecar. A completed mux is re-opened and required to contain both video and audio tracks before it can replace the original. The temporary `video-only.tmp.mov` step is a same-volume rename, not a third full copy, so an APFS clone is not useful for that replacement step; the dominant temporary allocation is the newly exported muxed movie itself.
 
 The target Mac/game was re-tested after the 1/60 ScreenCaptureKit scheduler change and the user confirmed that the previously reproducible periodic audio interruption is no longer occurring. Keep the PCM zero-run counters enabled because this is real-device evidence for the current target, not a guarantee across every macOS release or application. A/V sync still requires separate real-device validation; CI only proves the code builds/packages.
 
@@ -166,3 +167,73 @@ Automated validation **cannot** prove game-render FPS, rare 4K60 frame loss, HUD
 5. Verify DMG SHA-256, then tag/release PlayTools and PlayCover with the same PTMC version.
 6. Update `EmilyTsum/homebrew-tap` cask to the released DMG SHA and require install/startup smoke success.
 7. Remove temporary build/download files and temporary PR refs. Keep the legacy overlay repository intact.
+
+## Visible preview investigation (October 2026)
+
+The capture and encoder pipelines remain independent of AVAssetWriter and WindowServer
+composition. Display presentation is never silently dropped in the new visible-preview
+preset. **Enable visible low-latency preview** clears display suppression and unsafe
+skip-present, and experiments with `displaySyncEnabled = NO` only during recording;
+the original layer state is restored afterwards. This is not a guaranteed speed-up.
+
+PlayTools reports `presentGapsOverBudget` (present intervals > 1.5 × recent source cadence
+(capped at the capture interval)) and `maxPresentGapUs` in addition to existing producer/encoder drop
+counters. For each matched 4K/60 or 4K/120 trial, measure visible preview with
+display sync on, visible preview with low-latency mode, and fully transparent output.
+A present-cadence gap does not by itself prove compositor latency; confirm with Metal
+System Trace/Instruments when a visible-preview difference persists. Do not enable
+`skipDisplayPresent` by default: unpresented CAMetalDrawable reuse is unsafe.
+
+## October 15 follow-up: writer ownership and measurement
+
+The main target application for acceptance testing is **ミリシタ / THE iDOLM@STER Million Live!
+Theater Days** (`jp.co.bandainamcoent.BNEI0310`). Use a repeatable MV, fixed idols/outfits,
+camera/graphics settings and the same audio mode for the 4K60/120 preview comparison.
+The direct CAMetalDrawable route observed in this title is a required test path; a native
+command-buffer smoke test does not establish translated Unity game performance.
+
+The follow-up runtime bounds compressed writes at 64 frames / 64 MiB and fixes final-frame
+ownership during Stop. Control notifications, preparation, delayed hook discovery and heartbeat
+work are serialized; discovery skips idle recordings and clamps class enumeration to allocated
+capacity. Nested native present selectors are forwarded normally but captured once. Finalized
+and error status is retained while idle. Native-size sRGB HEVC conversion can reuse a storage
+view to avoid decode/re-encode work; scaled interpolation and all existing codec choices remain.
+The host displays CPU-call peaks and separates GPU admission drops from encoder-residency drops.
+
+Detailed implementation, local synthetic GPU/codec evidence and remaining acceptance steps:
+[PlayTools validation document](https://github.com/EmilyTsum/PlayTools/blob/feat/ptmc-4-preview-20261015/docs/PTMC/PREVIEW_VALIDATION_20261015.md).
+An opt-in independent preview window is now implemented (see the October 16 section below);
+the reported ミリシタ visible-preview stall is not claimed fixed without matched MV validation. These PRs remain experimental; production branches/releases are
+not replaced.
+
+Collect heartbeat snapshots without changing runtime presentation settings:
+
+```sh
+./scripts/ptmcctl.swift trace jp.co.bandainamcoent.BNEI0310 60 NEW-visible-4k60.jsonl visible-4k60
+python3 scripts/ptmc_trace_summary.py NEW-visible-4k60.jsonl
+```
+
+Start/stop through PlayCover for app audio; `trace` only observes the status file, and refuses
+to overwrite an existing trace. It records status age, generation, configuration and thermal
+state. The summary deduplicates heartbeats, separates generations, reports stale/missing data
+and rejects counter-reset windows. `scripts/test_ptmc_trace_summary.py` covers those cases.
+
+A short real ミリシタ MV smoke on Apple M5 captured/wrote 1190/1190 frames at visible
+3840x2160 HEVC 4:2:2/60 with no pool/encoder drops. This was video-only, with a process-local
+framework override and the existing installed AKInterface plugin. It does not establish
+sustained performance, 120 fps, A/V sync or full new-installation parity. Full evidence and
+remaining acceptance conditions are in the linked PlayTools validation document.
+
+## Independent preview window (2026-10-16, experimental)
+
+The capture settings now expose a separate preview window (at most 1280x720/60),
+with recording resolution, codec and target FPS unchanged. A three-texture mailbox
+and separate Metal display queue isolate preview drawable stalls. Original game
+drawables still present; the full-resolution game layer becomes transparent only
+while preview work is healthy, then restores on Stop or preview timeout.
+
+The preview window is display-only. Stop before navigating the original game view.
+This is opt-in and does not replace the old display-sync experiment automatically.
+Synthetic 4K60 and two-second preview-stall tests passed without capture pool or
+encoder drops. Matched MLTD MV performance and long recordings remain unverified.
+See PlayTools docs/PTMC/INDEPENDENT_PREVIEW.md for architecture and limitations.

@@ -44,6 +44,7 @@ enum MetalCapturePaths {
             "bitrate": min(max(settings.metalCaptureBitrateMbps, 1), 1000) * 1_000_000,
             "buffers": min(max(settings.metalCaptureBuffers, 3), 16),
             "logInterval": min(max(settings.metalCaptureLogInterval, 0.25), 60.0),
+            "independentPreview": settings.metalCaptureIndependentPreview,
             "disableDisplaySync": settings.metalCaptureDisableDisplaySync,
             "forceSDRDisplay": settings.metalCaptureForceSDRDisplay,
             "spoofMaxFPS": min(max(settings.metalCaptureSpoofMaxFPS, 0), 240),
@@ -150,10 +151,16 @@ class PlayApp: BaseApp {
                 throw PlayCoverError.appMaliciousProhibited
             }
 
-            AppsVM.shared.fetchApps()
             if await VersionCheck.shared.checkNewVersion(myApp: self) { return }
 
             settings.sync()
+
+            // Install PlugIns/localizations before signing so the bundle is fully
+            // assembled before its signature is sealed over its contents.
+            // If the app does not have PlayTools, do not install PlugIns
+            if hasPlayTools() {
+                try PlayTools.installPluginInIPA(url)
+            }
 
             if try !Entitlements.areEntitlementsValid(app: self) {
                 sign()
@@ -165,11 +172,6 @@ class PlayApp: BaseApp {
 
             // Wait for keychain unlock to finish before continuing
             await unlockKeyCover()
-
-            // If the app does not have PlayTools, do not install PlugIns
-            if hasPlayTools() {
-                try PlayTools.installPluginInIPA(url)
-            }
 
             if try !PlayTools.isInstalled() {
                 Log.shared.error("PlayTools are not installed! Please move PlayCover.app into Applications!")
@@ -331,6 +333,7 @@ extension PlayApp {
             "PTMC_BITRATE": String(bitrateMbps * 1_000_000),
             "PTMC_BUFFERS": String(buffers),
             "PTMC_LOG_INTERVAL": String(logInterval),
+            "PTMC_INDEPENDENT_PREVIEW": capture.metalCaptureIndependentPreview ? "1" : "0",
             "PTMC_DISABLE_DISPLAY_SYNC": capture.metalCaptureDisableDisplaySync ? "1" : "0",
             "PTMC_FORCE_SDR_DISPLAY": capture.metalCaptureForceSDRDisplay ? "1" : "0",
             "PTMC_SPOOF_MAX_FPS": String(spoofMaxFPS),

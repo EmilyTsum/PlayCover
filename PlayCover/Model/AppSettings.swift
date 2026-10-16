@@ -70,6 +70,7 @@ struct AppSettingsData: Codable {
     var metalCaptureBitrateMbps = 120
     var metalCaptureBuffers = 3
     var metalCaptureLogInterval = 1.0
+    var metalCaptureIndependentPreview = false
     var metalCaptureDisableDisplaySync = false
     var metalCaptureForceSDRDisplay = true
     var metalCaptureSpoofMaxFPS = 0
@@ -165,6 +166,9 @@ struct AppSettingsData: Codable {
         metalCaptureBitrateMbps = decodeCaptureValue(Int.self, forKey: .metalCaptureBitrateMbps, default: 120)
         metalCaptureBuffers = decodeCaptureValue(Int.self, forKey: .metalCaptureBuffers, default: 3)
         metalCaptureLogInterval = decodeCaptureValue(Double.self, forKey: .metalCaptureLogInterval, default: 1.0)
+        metalCaptureIndependentPreview = decodeCaptureValue(
+            Bool.self, forKey: .metalCaptureIndependentPreview, default: false
+        )
         metalCaptureDisableDisplaySync = decodeCaptureValue(
             Bool.self, forKey: .metalCaptureDisableDisplaySync, default: false
         )
@@ -223,7 +227,26 @@ class AppSettings: ObservableObject {
     }
 
     public func sync() {
-        settings.notch = NSScreen.hasNotch()
+        var updatedSettings = settings
+        updatedSettings.notch = NSScreen.hasNotch()
+        if updatedSettings.resolution == 1 {
+            let resolution = AppSettings.autoResolution()
+            updatedSettings.windowWidth = resolution.width
+            updatedSettings.windowHeight = resolution.height
+        }
+        settings = updatedSettings
+    }
+
+    static func autoResolution() -> (width: Int, height: Int) {
+        let width = Int(NSScreen.main?.frame.width ?? 1920)
+        let height = Int(NSScreen.main?.frame.height ?? 1080)
+        let wFloat = Float(width)
+        let hFloat = Float(height)
+        if NSScreen.hasNotch() && (hFloat/wFloat)*16.0 > 10.3 && (hFloat/wFloat)*16.0 < 10.4 {
+            return (width, Int((wFloat / 16) * 10))
+        } else {
+            return (width, height)
+        }
     }
 
     public func reset() {

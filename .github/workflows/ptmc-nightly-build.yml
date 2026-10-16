@@ -3,6 +3,8 @@ name: PTMC ad-hoc nightly
 on:
   push:
     branches: [ptmc-nightly]
+  pull_request:
+    branches: [ptmc-nightly]
   workflow_dispatch:
   schedule:
     - cron: "45 19 * * *"
@@ -25,6 +27,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Toolchain
@@ -57,6 +60,9 @@ jobs:
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'samplingSkipPerSecond'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'presentFPS'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'presentPath'
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'encoderResidencyBuffers'
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'pendingWriteBytes'
+          strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'maxPresentCallUs'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'MTLCommandBuffer present hooks installed'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'PTMC_CAPTURE_METAL_HUD'
           strings Carthage/Build/PlayTools.xcframework/ios-arm64/PlayTools.framework/PlayTools | grep -F 'burstSlotUses'
@@ -72,6 +78,9 @@ jobs:
 
       - name: Validate PTMC host controls invariants
         run: scripts/verify_ptmc_controls.sh
+
+      - name: Validate trace summaries
+        run: python3 scripts/test_ptmc_trace_summary.py
 
       - name: Build PlayCover PTMC
         shell: bash

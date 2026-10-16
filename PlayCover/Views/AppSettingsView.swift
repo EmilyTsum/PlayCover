@@ -64,7 +64,7 @@ struct AppSettingsView: View {
                     if let image = appIcon {
                         Image(nsImage: image)
                             .resizable()
-                            .aspectRatio(contentMode: .fit)
+                            .scaledToFit()
                     } else {
                         ProgressView()
                             .progressViewStyle(.circular)
@@ -245,6 +245,13 @@ struct MetalCaptureStatus {
     let droppedPool: Int
     let droppedEncoder: Int
     let droppedLate: Int
+    let presentGapsOverBudget: Int
+    let maxPresentGapUs: Int
+    let maxCaptureHookUs: Int
+    let maxPresentCallUs: Int
+    let droppedGPU: Int
+    let droppedResidency: Int
+    let pendingWriteBytes: Int
     let unsupported: Int
     let skippedRate: Int
     let samplingSkipPerSecond: Double
@@ -265,6 +272,10 @@ struct MetalCaptureStatus {
     let presentHookCount: Int
     let presentPath: String
     let captureEnabled: Bool
+    let independentPreviewRequested: Bool
+    let independentPreviewActive: Bool
+    let previewPresented: Int
+    let previewSkipped: Int
     let displaySuppressed: Bool
     let displayPresentSkipped: Bool
     let includeMetalHUDInCapture: Bool
@@ -305,6 +316,13 @@ struct MetalCaptureStatus {
             droppedPool: integer("droppedPool"),
             droppedEncoder: integer("droppedEncoder"),
             droppedLate: integer("droppedLate"),
+            presentGapsOverBudget: integer("presentGapsOverBudget"),
+            maxPresentGapUs: integer("maxPresentGapUs"),
+            maxCaptureHookUs: integer("maxCaptureHookUs"),
+            maxPresentCallUs: integer("maxPresentCallUs"),
+            droppedGPU: integer("droppedGPU"),
+            droppedResidency: integer("droppedResidency"),
+            pendingWriteBytes: integer("pendingWriteBytes"),
             unsupported: integer("unsupported"),
             skippedRate: integer("samplingSkipped"),
             samplingSkipPerSecond: (values["samplingSkipPerSecond"] as? NSNumber)?.doubleValue ?? 0,
@@ -325,6 +343,10 @@ struct MetalCaptureStatus {
             presentHookCount: integer("presentHookCount"),
             presentPath: values["presentPath"] as? String ?? "undetermined",
             captureEnabled: (values["captureEnabled"] as? NSNumber)?.boolValue ?? false,
+            independentPreviewRequested: (values["independentPreviewRequested"] as? NSNumber)?.boolValue ?? false,
+            independentPreviewActive: (values["independentPreviewActive"] as? NSNumber)?.boolValue ?? false,
+            previewPresented: integer("previewPresented"),
+            previewSkipped: integer("previewSkipped"),
             displaySuppressed: (values["displaySuppressed"] as? NSNumber)?.boolValue ?? false,
             displayPresentSkipped: (values["displayPresentSkipped"] as? NSNumber)?.boolValue ?? false,
             includeMetalHUDInCapture: (values["includeMetalHUDInCapture"] as? NSNumber)?.boolValue ?? false,
@@ -1428,9 +1450,10 @@ struct MetalCaptureView: View {
                         }
                     }
                     Text(
-                        "3 is recommended for low-latency capture. PTMC separately preallocates three additional " +
-                        "IOSurfaces for VideoToolbox residency, so encoder latency no longer deepens the GPU work " +
-                        "queue. Increase this only when GPU completion itself is falling behind."
+                        "3 is recommended for low-latency capture. PTMC separately preallocates a bounded " +
+                        "75 ms reserve of IOSurfaces for VideoToolbox residency, without deepening the GPU queue. " +
+                        "Higher capture FPS uses more raw-buffer memory. Increase the GPU limit only when " +
+                        "GPU completion itself is falling behind."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1447,9 +1470,27 @@ struct MetalCaptureView: View {
 
                     Divider()
 
-                    Toggle("Disable CAMetalLayer display synchronization",
+                    Button("Enable independent preview (experimental)") {
+                        // Keep native drawable recycling; never silently enable unsafe headless present.
+                        settings.settings.metalCaptureSuppressDisplayOutput = false
+                        settings.settings.metalCaptureSkipDisplayPresent = false
+                        settings.settings.metalCaptureIndependentPreview = true
+                        settings.settings.metalCaptureDisableDisplaySync = false
+                        syncRuntimeConfiguration(command: "status")
+                    }
+                    .help("Opens a separate Metal preview window at up to 720p/60 while recording at full quality. " +
+                          "Preview stalls drop preview frames only. Takes effect on the next recording.")
+
+                    Toggle("Independent preview (up to 720p/60, experimental)",
+                           isOn: $settings.settings.metalCaptureIndependentPreview)
+                        .help("Keeps native drawable recycling and uses a bounded separate display queue. " +
+                              "Recording quality is unchanged. Stop recording to restore the game view for navigation.")
+
+                    Toggle("Low-latency preview (disable display synchronization)",
                            isOn: $settings.settings.metalCaptureDisableDisplaySync)
-                        .help("Optional frame-pacing diagnostic. Leave off unless the game presents at only 60 fps.")
+                        .help("Keeps normal presents but removes CAMetalLayer display synchronization " +
+                              "while recording. May help frame pacing on some games; on GPU-bound " +
+                              "games it can make performance worse. Restored on Stop.")
 
                     Toggle("Suppress on-screen game output while recording (experimental)",
                            isOn: $settings.settings.metalCaptureSuppressDisplayOutput)
@@ -1598,6 +1639,9 @@ struct MetalCaptureView: View {
         .onChange(of: settings.settings.metalCaptureIncludeHUD) { _ in
             syncRuntimeConfiguration(command: "status")
         }
+        .onChange(of: settings.settings.metalCaptureIndependentPreview) { _ in
+            syncRuntimeConfiguration(command: "status")
+        }
         .onChange(of: settings.settings.metalCaptureDisableDisplaySync) { _ in
             syncRuntimeConfiguration(command: "status")
         }
@@ -1687,6 +1731,23 @@ struct MetalCaptureView: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
                 }
+                if status.presented > 1 {
+                    Text("pool drops: GPU busy \(status.droppedGPU) • " +
+                         "encoder residency \(status.droppedResidency) • " +
+                         "compressed backlog " +
+                         "\(String(format: "%.1f", Double(status.pendingWriteBytes) / 1_048_576)) MiB")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Text("peak CPU calls: capture " +
+                         "\(String(format: "%.2f", Double(status.maxCaptureHookUs) / 1000)) ms • " +
+                         "native present \(String(format: "%.2f", Double(status.maxPresentCallUs) / 1000)) ms")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Text("present pacing: \(status.presentGapsOverBudget) gaps above 1.5× source cadence • " +
+                         "largest \(String(format: "%.2f", Double(status.maxPresentGapUs) / 1000)) ms")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
                 if status.samplingSkipPerSecond > 1,
                    status.presentFPS > Double(settings.settings.metalCaptureFPS) + 5 {
                     Text(
@@ -1695,6 +1756,13 @@ struct MetalCaptureView: View {
                     )
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                }
+                if status.independentPreviewRequested {
+                    Text("Independent preview: " +
+                         (status.independentPreviewActive ? "active" : "native display / stopped") +
+                         " • shown \(status.previewPresented) • preview skips \(status.previewSkipped)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
                 Text("SDR gate \(status.captureEnabled ? "enabled" : "disabled") • " +
                      "EDR \(status.edr == 1 ? "on" : "off") • colorspace \(status.colorSpace)")
@@ -2026,11 +2094,10 @@ struct GraphicsView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .trailing)
                     } else if settings.settings.resolution == 1 {
-                        let width = Int(NSScreen.main?.frame.width ?? 1920)
-                        let height = getHeightForNotch(width, Int(NSScreen.main?.frame.height ?? 1080))
+                        let resolution = AppSettings.autoResolution()
                         Text("settings.text.detectedResolution")
                         Spacer()
-                        Text("\(width) x \(height)")
+                        Text("\(resolution.width) x \(resolution.height)")
                     } else {
                         Spacer()
                     }
@@ -2131,8 +2198,9 @@ struct GraphicsView: View {
         switch settings.settings.resolution {
         // Adaptive resolution = Auto
         case 1:
-            width = Int(NSScreen.main?.frame.width ?? 1920)
-            height = getHeightForNotch(width, Int(NSScreen.main?.frame.height ?? 1080))
+            let resolution = AppSettings.autoResolution()
+            width = resolution.width
+            height = resolution.height
         // Adaptive resolution = 1080p
         case 2:
             height = 1080
@@ -2183,16 +2251,6 @@ struct GraphicsView: View {
         }
         return (height / heightRatio) * widthRatio
     }
-    func getHeightForNotch(_ width: Int, _ height: Int) -> Int {
-        let wFloat = Float(width)
-        let hFloat = Float(height)
-        if NSScreen.hasNotch() && (hFloat/wFloat)*16.0 > 10.3 && (hFloat/wFloat)*16.0 < 10.4 {
-            return Int((wFloat / 16) * 10)
-        } else {
-            return Int(height)
-        }
-    }
-
     func setAspectRatioForResizableWindow() {
         var widthRatio = 0
         var heightRatio = 0
@@ -2328,7 +2386,10 @@ struct MiscView: View {
     @AppStorage("settings.settings.metalHUD") private var metalHUD = true
     @AppStorage("settings.openWithLLDB") private var openWithLLDB = false
     @AppStorage("settings.openLLDBWithTerminal") private var openLLDBWithTerminal = false
+    @AppStorage("settings.customPluginsWarningShown") private var hasShownCustomPluginWarning = false
     @State var showPopover = false
+    @State private var userDylibs: [URL] = []
+    @State private var showCustomPluginWarning = false
     var app: PlayApp
     @State var applicationCategoryType: LSApplicationCategoryType
     var body: some View {
@@ -2365,8 +2426,6 @@ struct MiscView: View {
                         }
                     }
                 }
-                Spacer()
-                    .frame(height: 20)
                 HStack {
                     Toggle("settings.toggle.discord", isOn: $settings.settings.discordActivity.enable)
                     Spacer()
@@ -2410,8 +2469,6 @@ struct MiscView: View {
                             }
                         }
                 }.disabled(!(hasPlayTools ?? true))
-                Spacer()
-                    .frame(height: 20)
                 HStack {
                     HStack {
                         Toggle("settings.toggle.hud", isOn: $settings.settings.metalHUD)
@@ -2441,9 +2498,33 @@ struct MiscView: View {
                         }
                     }
                 }
-                Spacer()
-                    .frame(height: 20)
                 HStack {
+                    Toggle("settings.toggle.rootWorkDir", isOn: $settings.settings.rootWorkDir)
+                        .disabled(!(hasPlayTools ?? true))
+                        .help("settings.toggle.rootWorkDir.help")
+                    Spacer()
+                }
+                HStack {
+                    Toggle("settings.toggle.limitMotionUpdateFrequency",
+                           isOn: $settings.settings.limitMotionUpdateFrequency)
+                        .disabled(!(hasPlayTools ?? true))
+                        .help("settings.toggle.limitMotionUpdateFrequency.help")
+                    Spacer()
+                }
+                HStack {
+                    Toggle("settings.toggle.ignoreUnityKeyboardInitializationError",
+                           isOn: $settings.settings.ignoreUnityKeyboardInitializationError)
+                        .disabled(!(hasPlayTools ?? true))
+                        .help("settings.toggle.ignoreUnityKeyboardInitializationError.help")
+                    Spacer()
+                }
+                CustomDylibView(app: app,
+                                showCustomPluginWarning: $showCustomPluginWarning,
+                                hasShownCustomPluginWarning: $hasShownCustomPluginWarning,
+                                hasPlayTools: $hasPlayTools,
+                                userDylibs: $userDylibs)
+                HStack {
+                    Spacer()
                     Button {
                         task = .playTools
                         Task(priority: .userInitiated) {
@@ -2474,33 +2555,7 @@ struct MiscView: View {
                                 }
                             }
                     }
-                    Spacer()
-                }
-                Spacer()
-                    .frame(height: 20)
-                HStack {
-                    Toggle("settings.toggle.rootWorkDir", isOn: $settings.settings.rootWorkDir)
-                        .disabled(!(hasPlayTools ?? true))
-                        .help("settings.toggle.rootWorkDir.help")
-                    Spacer()
-                }
-                Spacer()
-                    .frame(height: 20)
-                HStack {
-                    Toggle("settings.toggle.limitMotionUpdateFrequency",
-                           isOn: $settings.settings.limitMotionUpdateFrequency)
-                        .disabled(!(hasPlayTools ?? true))
-                        .help("settings.toggle.limitMotionUpdateFrequency.help")
-                    Spacer()
-                }
-                Spacer()
-                    .frame(height: 20)
-                HStack {
-                    Toggle("settings.toggle.ignoreUnityKeyboardInitializationError",
-                           isOn: $settings.settings.ignoreUnityKeyboardInitializationError)
-                        .disabled(!(hasPlayTools ?? true))
-                        .help("settings.toggle.ignoreUnityKeyboardInitializationError.help")
-                    Spacer()
+                    .buttonStyle(.borderedProminent).tint(Color.red)
                 }
             }
             .padding()
@@ -2514,6 +2569,102 @@ struct MiscView: View {
             return false
         }
     }
+
+}
+
+struct CustomDylibView: View {
+    var app: PlayApp
+    @Binding var showCustomPluginWarning: Bool
+    @Binding var hasShownCustomPluginWarning: Bool
+    @Binding var hasPlayTools: Bool?
+    @Binding var userDylibs: [URL]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("settings.customPlugins.title")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    if hasShownCustomPluginWarning {
+                        selectAndAddDylib()
+                    } else {
+                        showCustomPluginWarning = true
+                    }
+                } label: {
+                    Label("settings.customPlugins.add", systemImage: "plus")
+                }
+            }
+            if userDylibs.isEmpty {
+                Text("settings.customPlugins.empty")
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+            } else {
+                ForEach(userDylibs, id: \.self) { dylib in
+                    HStack {
+                        Text(dylib.lastPathComponent)
+                        Spacer()
+                        Button {
+                            removeDylib(dylib)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .disabled(!(hasPlayTools ?? true))
+        .onAppear {
+            reloadUserDylibs()
+        }
+        .alert("settings.customPlugins.warningTitle", isPresented: $showCustomPluginWarning) {
+            Button("button.Cancel", role: .cancel) {}
+            Button("settings.customPlugins.warningConfirm", role: .destructive) {
+                hasShownCustomPluginWarning = true
+                selectAndAddDylib()
+            }
+        } message: {
+            Text("settings.customPlugins.warningMessage")
+        }
+    }
+    private func reloadUserDylibs() {
+        userDylibs = PlayTools.userDylibs(bundleIdentifier: app.info.bundleIdentifier)
+    }
+
+    private func selectAndAddDylib() {
+        NSOpenPanel.selectDylib { result in
+            guard case .success(let url) = result else { return }
+            Task(priority: .userInitiated) {
+                do {
+                    try PlayTools.addUserDylib(at: url,
+                                               bundleIdentifier: app.info.bundleIdentifier,
+                                               appExecutable: app.executable)
+                } catch {
+                    Log.shared.error(error)
+                }
+                Task { @MainActor in
+                    reloadUserDylibs()
+                }
+            }
+        }
+    }
+
+    private func removeDylib(_ url: URL) {
+        Task(priority: .userInitiated) {
+            do {
+                try PlayTools.removeUserDylib(named: url.lastPathComponent,
+                                              bundleIdentifier: app.info.bundleIdentifier,
+                                              appExecutable: app.executable)
+            } catch {
+                Log.shared.error(error)
+            }
+            Task { @MainActor in
+                reloadUserDylibs()
+            }
+        }
+    }
+
 }
 
 struct InfoView: View {
