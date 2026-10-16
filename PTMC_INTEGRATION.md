@@ -6,7 +6,7 @@ This file is the first document to read for the `ptmc-nightly` branch. It record
 
 - Experimental PlayCover branch: `EmilyTsum/PlayCover:feat/ptmc-4-preview-20261015` (production line remains `ptmc-nightly`)
 - Experimental PlayTools branch: `EmilyTsum/PlayTools:feat/ptmc-4-preview-20261015` (production line remains `metal-capture`)
-- Pinned PlayTools commit: `d14150c5073fc47cf8ad21f746019524a37088d0`
+- Pinned PlayTools commit: `2e9ea6e192eb23b3e6467e48a8a54026cba75853`
 - Legacy overlay repository is retained only for reproducibility; it is not the active implementation.
 - October 2026 preview-port branch starts at official PlayCover `develop` commit `c8cf79f` (after the `4.0.0-prerelease` release), with PlayTools ported from current upstream `master` `fbc8880`. This remains an experimental fork build, not an official PlayCover 4.0 package.
 
@@ -202,8 +202,8 @@ The host displays CPU-call peaks and separates GPU admission drops from encoder-
 
 Detailed implementation, local synthetic GPU/codec evidence and remaining acceptance steps:
 [PlayTools validation document](https://github.com/EmilyTsum/PlayTools/blob/feat/ptmc-4-preview-20261015/docs/PTMC/PREVIEW_VALIDATION_20261015.md).
-Independent lightweight preview is not implemented and the reported ミリシタ visible-preview
-stall is not claimed fixed. These PRs remain experimental; production branches/releases are
+An opt-in independent preview window is now implemented (see the October 16 section below);
+the reported ミリシタ visible-preview stall is not claimed fixed without matched MV validation. These PRs remain experimental; production branches/releases are
 not replaced.
 
 Collect heartbeat snapshots without changing runtime presentation settings:
